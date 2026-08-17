@@ -1,24 +1,33 @@
 # DebSCP
 
-DebSCP is a native Linux desktop and command-line SFTP client inspired by the
-workflow of WinSCP. It provides a dual-pane file manager, saved session
-profiles, strict SSH host-key verification, queued transfers, and Debian
-packaging without Wine or Windows libraries.
+DebSCP is a native Linux desktop and command-line file transfer client inspired by the
+workflow of WinSCP. It provides a dual-pane file manager, SFTP, SCP, FTP/FTPS,
+WebDAV and S3 backends, synchronization, remote editing, saved workspaces,
+automation, and Debian packaging without Wine or Windows libraries.
 
-> **Project status:** v0.1.0 is an alpha-quality, SFTP-first foundation—not a
-> feature-complete WinSCP port. See the [compatibility matrix](docs/PORT_STATUS.md).
+> **Project status:** v0.2.0 implements every capability category in the port
+> matrix. It is still an independent implementation, so protocol edge cases
+> and UI details can differ from WinSCP. See the [compatibility matrix](docs/PORT_STATUS.md).
 > DebSCP is an independent project and is not affiliated with or endorsed by
 > the WinSCP project.
 
 ## Features
 
 - Native Linux GUI with local and remote file panes
-- SFTP over SSH with password, SSH agent, or private-key authentication
+- SFTP and SCP over SSH with password, SSH agent, or private-key authentication
+- FTP, certificate-validated FTPS, WebDAV/HTTPS, Amazon S3 and S3-compatible storage
 - Strict host-key checking with an explicit first-connection fingerprint prompt
-- Upload/download queue with progress and errors
+- Upload/download queue with recursive operations, progress and errors
 - Browse, create, rename, and delete remote files and empty directories
 - Saved profiles that deliberately never store passwords
-- Scriptable CLI for listing and file operations
+- Bidirectional synchronization, reviewable checklists, and keep-up-to-date mode
+- Conflict-checked remote editing and named include/exclude transfer presets
+- Resumable transfers and temporary-name atomic finalization where supported
+- OpenSSH config, ProxyCommand and jump-host support
+- Live connection tabs and saved workspaces
+- Scriptable batch/JSON CLI and stable Python automation API
+- Linux file-manager “Send with DebSCP” action
+- Spanish and French gettext translations
 - Reproducible Debian source package and `.deb` CI/release builds
 
 ## Install a release
@@ -26,7 +35,7 @@ packaging without Wine or Windows libraries.
 Download the `.deb` from the repository's Releases page and run:
 
 ```sh
-sudo apt install ./debscp_0.1.0_all.deb
+sudo apt install ./debscp_0.2.0_all.deb
 ```
 
 Launch **DebSCP** from the application menu, run `debscp-gui`, or use the CLI:
@@ -36,6 +45,7 @@ debscp save production example.com --user deploy --key ~/.ssh/id_ed25519
 debscp ls production /var/www
 debscp get production /var/www/app.log ./app.log
 debscp put production ./release.tar.gz /var/www/release.tar.gz
+debscp sync production ./site /var/www --direction upload --apply
 ```
 
 For password authentication in scripts, pipe the password rather than putting
@@ -54,8 +64,8 @@ On Debian or Ubuntu:
 
 ```sh
 sudo apt install build-essential devscripts debhelper dh-python \
-  pybuild-plugin-pyproject python3-all python3-setuptools python3-paramiko \
-  python3-tk python3-pytest ruff
+  pybuild-plugin-pyproject python3-all python3-setuptools python3-boto3 \
+  python3-paramiko python3-requests python3-scp python3-tk python3-pytest ruff
 python3 -m pytest
 ruff check src tests
 ./packaging/build-deb.sh
@@ -91,6 +101,7 @@ important systems and keep independent backups.
 - [WinSCP architecture study](docs/WINSCP_ARCHITECTURE.md)
 - [Port status and compatibility matrix](docs/PORT_STATUS.md)
 - [DebSCP architecture](docs/ARCHITECTURE.md)
+- [Automation reference](docs/AUTOMATION.md)
 - [Contributing](CONTRIBUTING.md)
 
 ## License

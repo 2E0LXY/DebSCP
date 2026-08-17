@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "debscp"
-version = "0.1.0"
-description = "Native Linux dual-pane SFTP client inspired by WinSCP"
+version = "0.2.0"
+description = "Native Linux multi-protocol file transfer client inspired by WinSCP"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [{name = "DebSCP contributors"}]
-dependencies = ["paramiko>=2.12"]
+dependencies = ["boto3>=1.26", "paramiko>=2.12", "requests>=2.28", "scp>=0.14"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: X11 Applications",
@@ -24,12 +24,16 @@ test = ["pytest>=8", "ruff>=0.8"]
 
 [project.scripts]
 debscp = "debscp.cli:main"
+debscp-send = "debscp.shell:main"
 
 [project.gui-scripts]
 debscp-gui = "debscp.gui:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+debscp = ["locale/*/LC_MESSAGES/*.mo"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

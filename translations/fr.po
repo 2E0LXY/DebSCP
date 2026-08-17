@@ -1,0 +1,30 @@
+msgid ""
+msgstr ""
+"Project-Id-Version: DebSCP 0.2.0\n"
+"Language: fr\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+
+msgid "Connection"
+msgstr "Connexion"
+
+msgid "Connect"
+msgstr "Connecter"
+
+msgid "Save"
+msgstr "Enregistrer"
+
+msgid "Upload"
+msgstr "Téléverser"
+
+msgid "Download"
+msgstr "Télécharger"
+
+msgid "Refresh"
+msgstr "Actualiser"
+
+msgid "Transfers"
+msgstr "Transferts"
+
+msgid "Ready"
+msgstr "Prêt"
+

@@ -14,6 +14,7 @@ jobs:
           python-version: "3.12"
       - run: python -m pip install --upgrade pip
       - run: python -m pip install -e . pytest ruff
+      - run: python tools/compile_translations.py
       - run: ruff check src tests
       - run: pytest
 
@@ -23,6 +24,7 @@ jobs:
       - uses: actions/checkout@v4
       - run: sudo apt-get update
       - run: sudo apt-get install -y build-essential debhelper dh-python devscripts pybuild-plugin-pyproject python3-all python3-setuptools
+      - run: python3 tools/compile_translations.py
       - run: dpkg-buildpackage --no-sign
       - run: mkdir -p artifacts && cp ../debscp_*.deb artifacts/
       - uses: actions/upload-artifact@v4

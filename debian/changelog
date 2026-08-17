@@ -1,5 +1,5 @@
-debscp (0.1.0) unstable; urgency=medium
+debscp (0.2.0) unstable; urgency=medium
 
-  * Initial Linux-native SFTP client release.
+  * Add complete multi-protocol and automation feature set.
 
  -- DebSCP contributors <noreply@github.com>  Mon, 17 Aug 2026 12:00:00 +0100

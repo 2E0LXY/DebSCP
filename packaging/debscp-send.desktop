@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Send with DebSCP
+Comment=Upload selected files using a saved DebSCP session
+Exec=debscp-send %F
+Icon=debscp
+Terminal=false
+NoDisplay=true
+MimeType=application/octet-stream;inode/directory;text/plain;image/jpeg;image/png;application/pdf;
+Categories=Network;FileTransfer;

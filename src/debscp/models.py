@@ -13,6 +13,12 @@ class SessionConfig:
     port: int = 22
     key_file: str | None = None
     remote_path: str = "/"
+    protocol: str = "sftp"
+    tls: bool = False
+    endpoint_url: str | None = None
+    region: str | None = None
+    proxy_command: str | None = None
+    jump_host: str | None = None
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -26,6 +32,12 @@ class SessionConfig:
             port=int(value.get("port", 22)),
             key_file=str(value["key_file"]) if value.get("key_file") else None,
             remote_path=str(value.get("remote_path", "/")),
+            protocol=str(value.get("protocol", "sftp")).lower(),
+            tls=bool(value.get("tls", False)),
+            endpoint_url=str(value["endpoint_url"]) if value.get("endpoint_url") else None,
+            region=str(value["region"]) if value.get("region") else None,
+            proxy_command=str(value["proxy_command"]) if value.get("proxy_command") else None,
+            jump_host=str(value["jump_host"]) if value.get("jump_host") else None,
         )
 
 

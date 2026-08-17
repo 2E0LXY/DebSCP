@@ -1,28 +1,62 @@
 # DebSCP architecture
 
-DebSCP keeps the successful separation found in WinSCP while using Linux-native
-dependencies and a much smaller initial surface.
+DebSCP preserves WinSCP's successful separation between user interfaces,
+session orchestration, transfer policy, and protocol filesystems while using
+portable Linux dependencies.
 
 ```mermaid
 flowchart TD
-    GUI["Tk desktop GUI"] --> B["RemoteBackend contract"]
-    CLI["debscp CLI"] --> B
-    GUI --> Q["Single-session transfer queue"]
-    Q --> B
-    B --> SFTP["Paramiko SFTP backend"]
-    GUI --> STORE["0600 JSON session profiles"]
+    GUI["Tabbed Tk desktop GUI"] --> B["RemoteBackend contract"]
+    CLI["Batch / JSON CLI"] --> B
+    API["debscp.Client Python API"] --> B
+    SHELL["Linux Send To action"] --> B
+    GUI --> Q["Per-session transfer queue"]
+    CLI --> SYNC["Checklist sync / watch engine"]
+    GUI --> SYNC
+    CLI --> EDIT["Conflict-checked remote editor"]
+    B --> SFTP["SFTP / SCP"]
+    B --> FTP["FTP / FTPS"]
+    B --> DAV["WebDAV / HTTPS"]
+    B --> S3["S3-compatible object stores"]
     SFTP --> KH["System + DebSCP known_hosts"]
+    SFTP --> PROXY["SSH config / ProxyCommand / jump host"]
+    GUI --> STORE["0600 sessions, presets, workspaces"]
 ```
 
-`RemoteBackend` is intentionally capability-neutral and small. A future
-capability query should accompany additional protocols so the GUI never assumes
-that object storage supports POSIX rename or that FTP supports SSH operations.
+## Backend contract
 
-The first transfer queue uses one worker because Paramiko's SFTP client is not
-treated as concurrently shareable. Future parallel transfers should allocate a
-connection per worker and impose explicit connection/rate limits.
+`RemoteBackend` presents listing, upload, download, create, delete, rename, and
+recursive tree operations. `BackendCapabilities` records resume, atomic-upload,
+recursive, permission, and symlink behavior. Protocol adapters preserve native
+semantics rather than claiming that FTP directories and S3 prefixes are POSIX
+filesystems.
 
-Passwords remain in memory. Profiles contain host, port, username, key path,
-and initial remote path. Unknown SSH keys raise a typed error; only the GUI can
-accept one after showing the fingerprint. CLI automation therefore fails safe.
+- SFTP uses Paramiko and implements resumed local temporary downloads and
+  resumed remote temporary uploads followed by atomic rename.
+- SCP uses the SCP data protocol while sharing the verified SSH connection and
+  SFTP management channel for browsing and metadata operations.
+- FTP uses MLSD and REST; FTPS uses the platform CA trust store and encrypted
+  data connections.
+- WebDAV uses standard OPTIONS, PROPFIND, GET, ranged GET, PUT, MKCOL, MOVE and
+  DELETE methods with TLS validation through Requests.
+- S3 supports AWS and custom endpoints, paginated prefix browsing, multipart
+  upload, ranged download, copy/delete rename, and recursive prefix operations.
+
+## Higher-level services
+
+`SyncEngine` first produces immutable `SyncAction` checklist items. The caller
+can display or serialize that plan before applying it. Upload, download,
+bidirectional, optional deletion, masks, and polling watch mode use the same
+engine.
+
+`RemoteEditor` downloads into an isolated temporary directory, waits for the
+configured editor, verifies that the remote size/timestamp did not change, and
+only then uploads the edited copy. `TransferPreset` centralizes include/exclude
+glob policy. Session, preset, workspace, and private known-host stores use
+owner-only permissions on Linux; passwords remain memory-only.
+
+The GUI can keep multiple live connections and switch them through tabs.
+Workspaces persist groups of profile names rather than credentials. CLI batch
+mode, structured JSON, stable exit codes, and `debscp.Client` provide automation
+without the Windows-only .NET process bridge.
 

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Native Linux dual-pane SFTP client inspired by WinSCP"
 readme = "README.md"
 requires-python = ">=3.11"
-license = "GPL-3.0-only"
+license = {file = "LICENSE"}
 authors = [{name = "DebSCP contributors"}]
 dependencies = ["paramiko>=2.12"]
 classifiers = [

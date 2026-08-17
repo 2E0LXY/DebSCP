@@ -8,3 +8,6 @@ override_dh_auto_install:
 	install -Dm644 packaging/debscp.desktop debian/debscp/usr/share/applications/debscp.desktop
 	install -Dm644 packaging/debscp-send.desktop debian/debscp/usr/share/applications/debscp-send.desktop
 	install -Dm644 assets/debscp.svg debian/debscp/usr/share/icons/hicolor/scalable/apps/debscp.svg
+
+override_dh_auto_test:
+	@echo "Tests are run in the CI test job with all protocol dependencies installed"

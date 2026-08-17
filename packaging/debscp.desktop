@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=DebSCP
+Comment=Securely transfer files over SFTP
+Exec=debscp-gui
+Icon=debscp
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=SFTP;SCP;SSH;files;transfer;
+

@@ -1,0 +1,17 @@
+Source: debscp
+Section: net
+Priority: optional
+Maintainer: DebSCP contributors <noreply@github.com>
+Build-Depends: debhelper-compat (= 13), dh-python, pybuild-plugin-pyproject, python3-all, python3-setuptools
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Homepage: https://github.com/2E0LXY/DebSCP
+
+Package: debscp
+Architecture: all
+Depends: ${misc:Depends}, ${python3:Depends}, python3-paramiko, python3-tk
+Description: native Linux dual-pane SFTP client
+ DebSCP provides saved non-secret session profiles, strict SSH host-key
+ verification, local and remote browsing, queued uploads and downloads, and
+ common remote file operations in a desktop GUI and CLI.
+

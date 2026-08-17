@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.venv/
+build/
+dist/
+debscp_*.buildinfo
+debscp_*.changes
+debscp_*.deb
+

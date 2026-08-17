@@ -1,0 +1,5 @@
+debscp (0.1.0) unstable; urgency=medium
+
+  * Initial Linux-native SFTP client release.
+
+ -- DebSCP contributors <noreply@github.com>  Mon, 17 Aug 2026 12:00:00 +0100

@@ -1,0 +1,40 @@
+[build-system]
+requires = ["setuptools>=66", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "debscp"
+version = "0.1.0"
+description = "Native Linux dual-pane SFTP client inspired by WinSCP"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "GPL-3.0-only"
+authors = [{name = "DebSCP contributors"}]
+dependencies = ["paramiko>=2.12"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: X11 Applications",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Internet :: File Transfer Protocol (FTP)",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8", "ruff>=0.8"]
+
+[project.scripts]
+debscp = "debscp.cli:main"
+
+[project.gui-scripts]
+debscp-gui = "debscp.gui:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"

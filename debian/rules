@@ -1,0 +1,10 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --buildsystem=pybuild
+
+override_dh_auto_install:
+	dh_auto_install
+	install -Dm644 packaging/debscp.desktop debian/debscp/usr/share/applications/debscp.desktop
+	install -Dm644 assets/debscp.svg debian/debscp/usr/share/icons/hicolor/scalable/apps/debscp.svg
+

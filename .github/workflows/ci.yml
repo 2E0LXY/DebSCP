@@ -24,8 +24,8 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install -y build-essential debhelper dh-python devscripts pybuild-plugin-pyproject python3-all python3-setuptools
       - run: dpkg-buildpackage --no-sign
+      - run: mkdir -p artifacts && cp ../debscp_*.deb artifacts/
       - uses: actions/upload-artifact@v4
         with:
           name: debscp-debian-package
-          path: ../debscp_*.deb
-
+          path: artifacts/*.deb

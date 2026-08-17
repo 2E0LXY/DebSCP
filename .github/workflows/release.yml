@@ -15,8 +15,8 @@ jobs:
       - run: sudo apt-get update
       - run: sudo apt-get install -y build-essential debhelper dh-python devscripts pybuild-plugin-pyproject python3-all python3-setuptools
       - run: dpkg-buildpackage --no-sign
+      - run: mkdir -p artifacts && cp ../debscp_*.deb artifacts/
       - uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
-          files: ../debscp_*.deb
-
+          files: artifacts/*.deb

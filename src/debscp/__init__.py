@@ -2,6 +2,12 @@
 
 __version__ = "0.2.0"
 
-from .api import Client
-
 __all__ = ["Client", "__version__"]
+
+
+def __getattr__(name: str):
+    if name == "Client":
+        from .api import Client
+
+        return Client
+    raise AttributeError(name)

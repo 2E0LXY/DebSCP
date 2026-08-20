@@ -21,3 +21,16 @@ def test_upsert_replaces_by_name(tmp_path) -> None:
     store.upsert(SessionConfig("lab", "old", "alex"))
     store.upsert(SessionConfig("lab", "new", "alex"))
     assert [item.host for item in store.load()] == ["new"]
+
+
+def test_merge_renames_collisions_or_overwrites(tmp_path) -> None:
+    store = SessionStore(tmp_path / "sessions.json")
+    store.upsert(SessionConfig("lab", "old", "alex"))
+    stored, renamed = store.merge([SessionConfig("lab", "imported", "alex")])
+    assert stored == ["lab 2"]
+    assert renamed == ["lab → lab 2"]
+    assert [item.name for item in store.load()] == ["lab", "lab 2"]
+
+    stored, renamed = store.merge([SessionConfig("lab", "replacement", "alex")], overwrite=True)
+    assert (stored, renamed) == (["lab"], [])
+    assert next(item for item in store.load() if item.name == "lab").host == "replacement"

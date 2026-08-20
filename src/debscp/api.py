@@ -6,6 +6,7 @@ from typing import Self
 
 from .backends import create_backend
 from .backends.base import BackendCapabilities, RemoteBackend
+from .credentials import CredentialStore
 from .editor import RemoteEditor
 from .models import RemoteEntry, SessionConfig
 from .session_store import SessionStore
@@ -22,7 +23,8 @@ class Client:
             except StopIteration as exc:
                 raise ValueError(f"Unknown session: {session}") from exc
         self.config = session
-        self.backend: RemoteBackend = create_backend(session, password)
+        stored_password = CredentialStore().get(session.name) if password is None else password
+        self.backend: RemoteBackend = create_backend(session, stored_password)
 
     def open(self) -> Self:
         self.backend.connect()

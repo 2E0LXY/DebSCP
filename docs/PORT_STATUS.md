@@ -1,23 +1,24 @@
 # Compatibility matrix
 
-DebSCP v0.3.0 implements every capability category identified in the WinSCP
+DebSCP v0.4.0 implements every capability category identified in the WinSCP
 architecture study. “Yes” means the capability has a usable implementation;
 it does not mean byte-for-byte behavior or UI identity with WinSCP. Linux-only
 equivalents are used where a Windows technology has no portable meaning.
 
-| Capability | WinSCP | DebSCP v0.3.0 | Implementation |
+| Capability | WinSCP | DebSCP v0.4.0 | Implementation |
 |---|:---:|:---:|---|
 | Native desktop GUI | Yes | **Yes** | Tk-based native Linux desktop application |
 | Dual-pane Commander view | Yes | **Yes** | Local and remote browser panes |
 | SFTP browse/upload/download | Yes | **Yes** | Paramiko backend |
 | SSH agent/private key/password | Yes | **Yes** | Paramiko agent/key/password authentication |
 | Strict host-key verification | Yes | **Yes** | System and private known-hosts with SHA-256 confirmation |
-| Saved sessions, no saved password | Yes | **Yes** | Owner-only JSON profiles; secrets stay in memory |
+| Saved sessions and passwords | Yes | **Yes** | Owner-only JSON profiles plus OS credential-store secrets |
+| WinSCP backup INI import | Yes | **Yes** | GUI/CLI import with protocol, advanced-field, and standard-password mapping |
 | Transfer queue/progress | Yes | **Yes** | Serialized per-session background queue |
 | Remote mkdir/rename/delete | Yes | **Yes** | Capability-aware backend operations |
 | CLI automation | Yes | **Yes** | Batch files, JSON, stable exit codes, recursive operations |
 | SCP protocol | Yes | **Yes** | SCP data channel with SFTP management or SSH-command fallback |
-| FTP/FTPS | Yes | **Yes** | FTP and certificate-validated explicit FTPS |
+| FTP/FTPS | Yes | **Yes** | FTP plus certificate-validated explicit and implicit FTPS |
 | WebDAV | Yes | **Yes** | OPTIONS/PROPFIND/GET/PUT/MKCOL/MOVE/DELETE adapter |
 | S3 | Yes | **Yes** | AWS and S3-compatible endpoints, multipart transfer, prefixes |
 | Synchronize/keep up to date | Yes | **Yes** | Reviewable checklist, upload/download/both, watch mode |

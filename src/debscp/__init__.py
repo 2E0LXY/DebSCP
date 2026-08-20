@@ -1,6 +1,6 @@
 """DebSCP: a native Linux dual-pane SFTP client."""
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = ["Client", "__version__"]
 

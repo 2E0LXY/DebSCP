@@ -53,7 +53,8 @@ engine.
 configured editor, verifies that the remote size/timestamp did not change, and
 only then uploads the edited copy. `TransferPreset` centralizes include/exclude
 glob policy. Session, preset, workspace, and private known-host stores use
-owner-only permissions on Linux; passwords remain memory-only.
+owner-only permissions on Linux; passwords are kept out of profile JSON and
+stored through the operating system credential service.
 
 The GUI can keep multiple live connections and switch them through tabs.
 Workspaces persist groups of profile names rather than credentials. CLI batch

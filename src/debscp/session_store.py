@@ -37,5 +37,29 @@ class SessionStore:
         sessions.append(session)
         self.save(sorted(sessions, key=lambda item: item.name.casefold()))
 
+    def merge(self, imported: list[SessionConfig], *, overwrite: bool = False) -> tuple[list[str], list[str]]:
+        """Merge imported profiles, returning stored names and rename descriptions."""
+        sessions = self.load()
+        by_name = {item.name.casefold(): item for item in sessions}
+        stored: list[str] = []
+        renamed: list[str] = []
+        for candidate in imported:
+            original_name = candidate.name
+            key = candidate.name.casefold()
+            if key in by_name and overwrite:
+                sessions = [item for item in sessions if item.name.casefold() != key]
+            elif key in by_name:
+                number = 2
+                while f"{original_name} {number}".casefold() in by_name:
+                    number += 1
+                candidate = SessionConfig.from_dict({**candidate.to_dict(), "name": f"{original_name} {number}"})
+                key = candidate.name.casefold()
+                renamed.append(f"{original_name} → {candidate.name}")
+            sessions.append(candidate)
+            by_name[key] = candidate
+            stored.append(candidate.name)
+        self.save(sorted(sessions, key=lambda item: item.name.casefold()))
+        return stored, renamed
+
     def delete(self, name: str) -> None:
         self.save([item for item in self.load() if item.name != name])

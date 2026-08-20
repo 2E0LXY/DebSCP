@@ -5,6 +5,7 @@ from pathlib import Path, PurePosixPath
 from tkinter import messagebox, simpledialog
 
 from .backends import create_backend
+from .credentials import CredentialStore
 from .session_store import SessionStore
 
 
@@ -27,7 +28,9 @@ def send_files(paths: list[str]) -> int:
         messagebox.showerror("DebSCP", f"Unknown session: {name}", parent=root)
         root.destroy()
         return 2
-    password = simpledialog.askstring("DebSCP", "Password (leave empty for key/agent):", show="•", parent=root)
+    password = CredentialStore().get(session.name)
+    if password is None:
+        password = simpledialog.askstring("DebSCP", "Password (leave empty for key/agent):", show="•", parent=root)
     backend = create_backend(session, password or None)
     try:
         backend.connect()

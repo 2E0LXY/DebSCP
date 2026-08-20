@@ -8,6 +8,7 @@ Use `--json` before the subcommand for machine-readable results:
 debscp --json sessions
 debscp --json ls production /srv/app
 debscp --json sync production ./build /srv/app --direction upload
+debscp --json import-ini ~/Backups/WinSCP.ini
 ```
 
 Exit codes are stable:
@@ -32,6 +33,12 @@ sync production ./config /srv/app/config --direction upload --apply
 
 Run it with `debscp batch deploy.debscp`. Execution stops at the first failure
 unless `--continue-on-error` is specified.
+
+`import-ini FILE` imports all usable saved sites from a WinSCP configuration
+backup. Its JSON result contains `imported`, `passwords_imported`, `profiles`,
+`renamed`, and `warnings`. Name collisions are renamed by default; pass
+`--overwrite` to replace existing profiles. Standard WinSCP passwords are
+decrypted into the system credential store and never emitted in JSON.
 
 ## Python API
 

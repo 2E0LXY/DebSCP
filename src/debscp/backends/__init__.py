@@ -16,6 +16,7 @@ def create_backend(config: SessionConfig, password: str | None = None) -> Remote
         "scp": SCPBackend,
         "ftp": FTPBackend,
         "ftps": FTPBackend,
+        "ftps-implicit": FTPBackend,
         "webdav": WebDAVBackend,
         "webdavs": WebDAVBackend,
         "s3": S3Backend,

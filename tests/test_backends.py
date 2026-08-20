@@ -13,6 +13,7 @@ def test_backend_factory_selects_every_protocol() -> None:
         "scp": SCPBackend,
         "ftp": FTPBackend,
         "ftps": FTPBackend,
+        "ftps-implicit": FTPBackend,
         "webdav": WebDAVBackend,
         "webdavs": WebDAVBackend,
         "s3": S3Backend,

@@ -11,11 +11,13 @@ from pathlib import Path, PurePosixPath
 
 from . import __version__
 from .backends import UnknownHostKey, create_backend
+from .credentials import CredentialStore
 from .editor import RemoteEditConflict, RemoteEditor
 from .models import SessionConfig, default_port
 from .policies import PresetStore, TransferPreset
 from .session_store import SessionStore
 from .sync import SyncDirection, SyncEngine
+from .winscp_ini import load_winscp_ini
 from .workspaces import WorkspaceStore
 
 
@@ -38,7 +40,11 @@ def _parser() -> argparse.ArgumentParser:
     save = sub.add_parser("save", help="save a non-secret connection profile")
     save.add_argument("name")
     save.add_argument("host", help="hostname, or S3 bucket name")
-    save.add_argument("--protocol", choices=("sftp", "scp", "ftp", "ftps", "webdav", "webdavs", "s3"), default="sftp")
+    save.add_argument(
+        "--protocol",
+        choices=("sftp", "scp", "ftp", "ftps", "ftps-implicit", "webdav", "webdavs", "s3"),
+        default="sftp",
+    )
     save.add_argument("--user")
     save.add_argument("--port", type=int)
     save.add_argument("--key")
@@ -50,6 +56,9 @@ def _parser() -> argparse.ArgumentParser:
     save.add_argument("--jump-host")
 
     sub.add_parser("sessions", help="list saved profiles")
+    import_ini = sub.add_parser("import-ini", help="import saved sites from a WinSCP backup INI")
+    import_ini.add_argument("file", type=Path)
+    import_ini.add_argument("--overwrite", action="store_true", help="replace profiles with matching names")
     delete_session = sub.add_parser("delete-session")
     delete_session.add_argument("name")
 
@@ -108,8 +117,10 @@ def _emit(value: object, *, json_output: bool) -> None:
         print(value)
 
 
-def _password(args: argparse.Namespace) -> str | None:
-    return sys.stdin.readline().rstrip("\r\n") if getattr(args, "password_stdin", False) else None
+def _password(args: argparse.Namespace, session_name: str) -> str | None:
+    if getattr(args, "password_stdin", False):
+        return sys.stdin.readline().rstrip("\r\n") or None
+    return CredentialStore().get(session_name)
 
 
 def _session(name: str) -> SessionConfig:
@@ -125,7 +136,7 @@ def _progress(current: int, total: int) -> None:
 
 
 def _run_remote(args: argparse.Namespace) -> int:
-    backend = create_backend(_session(args.session), _password(args))
+    backend = create_backend(_session(args.session), _password(args, args.session))
     try:
         backend.connect()
     except UnknownHostKey as exc:
@@ -186,7 +197,7 @@ def _run_sync(args: argparse.Namespace) -> int:
     presets = {item.name: item for item in PresetStore().load()}
     if args.preset not in presets:
         raise ValueError(f"Unknown preset: {args.preset}")
-    backend = create_backend(_session(args.session), _password(args))
+    backend = create_backend(_session(args.session), _password(args, args.session))
     try:
         backend.connect()
     except UnknownHostKey:
@@ -262,14 +273,43 @@ def main(argv: list[str] | None = None) -> int:
                     args.jump_host,
                 )
             )
+        elif args.command == "import-ini":
+            result = load_winscp_ini(args.file)
+            if not result.sessions:
+                raise ValueError("The backup contains no importable WinSCP sites")
+            stored, renamed = SessionStore().merge(list(result.sessions), overwrite=args.overwrite)
+            credential_by_name = {item.session_name: item.password for item in result.credentials}
+            credential_store = CredentialStore()
+            passwords_imported = 0
+            for source, stored_name in zip(result.sessions, stored, strict=True):
+                password = credential_by_name.get(source.name)
+                if password:
+                    credential_store.set(stored_name, password)
+                    passwords_imported += 1
+            report = {
+                "imported": len(stored),
+                "passwords_imported": passwords_imported,
+                "profiles": stored,
+                "renamed": renamed,
+                "warnings": list(result.warnings),
+            }
+            if args.json:
+                _emit(report, json_output=True)
+            else:
+                print(f"Imported {len(stored)} WinSCP site(s): {', '.join(stored)}")
+                for item in renamed:
+                    print(f"Renamed: {item}")
+                for warning in result.warnings:
+                    print(f"Warning: {warning}", file=sys.stderr)
         elif args.command == "delete-session":
+            CredentialStore().delete(args.name)
             SessionStore().delete(args.name)
         elif args.command in ("ls", "get", "put", "mkdir", "rm", "rename"):
             return int(_run_remote(args))
         elif args.command == "sync":
             return int(_run_sync(args))
         elif args.command == "edit":
-            backend = create_backend(_session(args.session), _password(args))
+            backend = create_backend(_session(args.session), _password(args, args.session))
             try:
                 backend.connect()
             except UnknownHostKey:

@@ -6,15 +6,17 @@ import tkinter as tk
 from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path, PurePosixPath
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import filedialog, messagebox, simpledialog, ttk
 
 from .backends import RemoteBackend, SFTPBackend, UnknownHostKey, create_backend
+from .credentials import CredentialStore
 from .editor import RemoteEditConflict, RemoteEditor
 from .i18n import _
 from .models import DEFAULT_PORTS, RemoteEntry, SessionConfig, normalize_remote_path
 from .session_store import SessionStore
 from .sync import SyncDirection, SyncEngine
 from .transfer_queue import TransferJob, TransferQueue, TransferState
+from .winscp_ini import load_winscp_ini
 from .workspaces import WorkspaceStore
 
 
@@ -25,6 +27,7 @@ class DebSCPWindow(tk.Tk):
         self.geometry("1120x720")
         self.minsize(820, 520)
         self.store = SessionStore()
+        self.credential_store = CredentialStore()
         self.sessions = self.store.load()
         self.backend: RemoteBackend | None = None
         self.connections: dict[str, tuple[RemoteBackend, str]] = {}
@@ -78,7 +81,7 @@ class DebSCPWindow(tk.Tk):
         protocol_box = ttk.Combobox(
             connection,
             textvariable=self.protocol_name,
-            values=("sftp", "scp", "ftp", "ftps", "webdav", "webdavs", "s3"),
+            values=("sftp", "scp", "ftp", "ftps", "ftps-implicit", "webdav", "webdavs", "s3"),
             state="readonly",
             width=13,
         )
@@ -89,9 +92,12 @@ class DebSCPWindow(tk.Tk):
         ).grid(
             row=1,
             column=2,
-            columnspan=8,
+            columnspan=7,
             pady=(6, 0),
             sticky="w",
+        )
+        ttk.Button(connection, text="Import WinSCP INI", command=self._import_winscp_ini).grid(
+            row=1, column=9, padx=3, pady=(6, 0)
         )
         ttk.Button(connection, text="Save workspace", command=self._save_workspace).grid(
             row=1, column=10, padx=3, pady=(6, 0)
@@ -175,6 +181,7 @@ class DebSCPWindow(tk.Tk):
     def _profile_selected(self, _event: object = None) -> None:
         selected = next((item for item in self.sessions if item.name == self.session_name.get()), None)
         if selected:
+            self.password.set("")
             self.host.set(selected.host)
             self.port.set(str(selected.port))
             self.username.set(selected.username)
@@ -194,7 +201,15 @@ class DebSCPWindow(tk.Tk):
         protocol = self.protocol_name.get()
         host, username = self.host.get().strip(), self.username.get().strip()
         port, key_file = int(self.port.get()), self.key_file.get().strip() or None
-        remote_path, tls = self.remote_path_var.get().strip() or "/", protocol in ("ftps", "webdavs")
+        remote_path, tls = (
+            self.remote_path_var.get().strip() or "/",
+            protocol
+            in (
+                "ftps",
+                "ftps-implicit",
+                "webdavs",
+            ),
+        )
         existing = next((item for item in self.sessions if item.name == name), None)
         if existing:
             return replace(
@@ -214,17 +229,52 @@ class DebSCPWindow(tk.Tk):
         try:
             config = self._config()
             self.store.upsert(config)
-        except (OSError, ValueError) as exc:
+            if self.password.get():
+                self.credential_store.set(config.name, self.password.get())
+        except (OSError, RuntimeError, ValueError) as exc:
             messagebox.showerror("Cannot save profile", str(exc), parent=self)
             return
         self.session_name.set(config.name)
         self._load_session_names()
-        self.status.set(f"Saved {config.name}; passwords are never stored")
+        self.status.set(f"Saved {config.name}; password is protected by the system credential store")
+
+    def _import_winscp_ini(self) -> None:
+        selected = filedialog.askopenfilename(
+            title="Import WinSCP backup",
+            filetypes=(("WinSCP INI backup", "*.ini"), ("All files", "*")),
+            parent=self,
+        )
+        if not selected:
+            return
+        try:
+            result = load_winscp_ini(Path(selected))
+            if not result.sessions:
+                raise ValueError("The backup contains no importable WinSCP sites")
+            stored, renamed = self.store.merge(list(result.sessions))
+            credential_by_name = {item.session_name: item.password for item in result.credentials}
+            passwords_imported = 0
+            for source, stored_name in zip(result.sessions, stored, strict=True):
+                password = credential_by_name.get(source.name)
+                if password:
+                    self.credential_store.set(stored_name, password)
+                    passwords_imported += 1
+        except (OSError, RuntimeError, ValueError) as exc:
+            messagebox.showerror("Cannot import WinSCP backup", str(exc), parent=self)
+            return
+        self._load_session_names()
+        details = [f"Imported {len(stored)} site(s) and {passwords_imported} password(s)."]
+        if renamed:
+            details.append("Name collisions were kept as: " + ", ".join(renamed))
+        if result.warnings:
+            details.append("\nWarnings:\n" + "\n".join(f"• {item}" for item in result.warnings))
+        messagebox.showinfo("WinSCP import complete", "\n".join(details), parent=self)
+        self.status.set(f"Imported {len(stored)} WinSCP site(s) and {passwords_imported} password(s)")
 
     def _connect(self) -> None:
         try:
             config = self._config()
-        except ValueError as exc:
+            password = self.password.get() or self.credential_store.get(config.name)
+        except (RuntimeError, ValueError) as exc:
             messagebox.showerror("Invalid connection", str(exc), parent=self)
             return
         if config.protocol == "ftp" and not messagebox.askyesno(
@@ -235,7 +285,6 @@ class DebSCPWindow(tk.Tk):
         ):
             return
         self.status.set(f"Connecting to {config.host}…")
-        password = self.password.get() or None
         self._background(lambda: self._connect_worker(config, password))
 
     def _connect_worker(self, config: SessionConfig, password: str | None) -> None:
@@ -543,8 +592,8 @@ class DebSCPWindow(tk.Tk):
         for session_name in workspaces[name]:
             config = saved.get(session_name)
             if config and session_name not in self.connections:
-                password = None
-                if config.protocol != "s3":
+                password = self.credential_store.get(session_name)
+                if config.protocol != "s3" and password is None:
                     password = simpledialog.askstring(
                         "Workspace credentials",
                         f"Password for {session_name} (blank for key/agent):",

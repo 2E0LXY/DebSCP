@@ -5,7 +5,7 @@ workflow of WinSCP. It provides a dual-pane file manager, SFTP, SCP, FTP/FTPS,
 WebDAV and S3 backends, synchronization, remote editing, saved workspaces,
 automation, and Debian packaging without Wine or Windows libraries.
 
-> **Project status:** v0.3.0 implements every capability category in the port
+> **Project status:** v0.4.0 implements every capability category in the port
 > matrix. It is still an independent implementation, so protocol edge cases
 > and UI details can differ from WinSCP. See the [compatibility matrix](docs/PORT_STATUS.md).
 > DebSCP is an independent project and is not affiliated with or endorsed by
@@ -19,7 +19,8 @@ automation, and Debian packaging without Wine or Windows libraries.
 - Strict host-key checking with an explicit first-connection fingerprint prompt
 - Upload/download queue with recursive operations, progress and errors
 - Browse, create, rename, and recursively delete remote files and directories
-- Saved profiles that deliberately never store passwords
+- Saved profiles with passwords protected by the Linux system credential store
+- WinSCP backup INI import with protocol, key, path, tunnel, proxy-command, and S3 mapping
 - Bidirectional synchronization, reviewable checklists, and keep-up-to-date mode
 - Conflict-checked remote editing and named include/exclude transfer presets
 - Identity-validated resumable downloads and temporary-name atomic uploads where supported
@@ -32,10 +33,10 @@ automation, and Debian packaging without Wine or Windows libraries.
 
 ## Install a release
 
-Download the `.deb` from the repository's Releases page and run:
+Download the `.deb` from [GitHub Releases](https://github.com/2E0LXY/DebSCP/releases) and run:
 
 ```sh
-sudo apt install ./debscp_0.3.0_all.deb
+sudo apt install ./debscp_0.4.0_all.deb
 ```
 
 Launch **DebSCP** from the application menu, run `debscp-gui`, or use the CLI:
@@ -48,8 +49,9 @@ debscp put production ./release.tar.gz /var/www/release.tar.gz
 debscp sync production ./site /var/www --direction upload --apply
 ```
 
-For password authentication in scripts, pipe the password rather than putting
-it in process arguments:
+Imported or GUI-saved passwords are loaded automatically from the system
+credential store. To override one for a script, pipe it rather than putting it
+in process arguments:
 
 ```sh
 printf '%s\n' "$SFTP_PASSWORD" | debscp ls production / --password-stdin
@@ -58,6 +60,41 @@ printf '%s\n' "$SFTP_PASSWORD" | debscp ls production / --password-stdin
 The CLI refuses unknown host keys. Review and trust a new server key once in
 the GUI, after independently verifying its fingerprint.
 
+## Import sites from a WinSCP backup
+
+In the GUI, select **Import WinSCP INI**, choose the `.ini` created by WinSCP's
+**Tools → Export/Backup configuration** command, and review the import report.
+From the command line:
+
+```sh
+debscp import-ini ~/Backups/WinSCP.ini
+debscp --json import-ini ~/Backups/WinSCP.ini
+```
+
+Existing DebSCP profile names are preserved; imported collisions receive a
+numeric suffix, matching WinSCP's import behavior. Use `--overwrite` to replace
+same-named profiles instead. SFTP/SCP, explicit and implicit FTP/FTPS,
+WebDAV/WebDAVS, S3 endpoints
+and buckets, remote directories, private-key paths, local proxy commands, and
+SSH tunnels are mapped. Unsupported proxy types are called out for manual
+configuration.
+
+Standard WinSCP session passwords are decrypted during import and immediately
+saved under the final profile name in the operating system credential store.
+They are never written to `sessions.json`, logs, terminal output, or the import
+report. Backups protected by a WinSCP master password require separate master-
+password support and are reported without importing the protected value.
+Proxy passwords, key passphrases, and S3 session tokens are not imported.
+
+For your first connection after importing, select the saved profile and press
+**Connect**. DebSCP retrieves its password automatically; the password field can
+remain blank. The CLI and Python API use the same stored credential. Providing
+`--password-stdin` or an explicit API password overrides the saved value.
+
+Windows `LocalDirectory` values are reported but not imported because drive
+letters and UNC paths do not identify usable locations on Linux. Remote
+directories are imported normally.
+
 ## Build and test
 
 On Debian or Ubuntu:
@@ -65,7 +102,7 @@ On Debian or Ubuntu:
 ```sh
 sudo apt install build-essential devscripts debhelper dh-python \
   pybuild-plugin-pyproject python3-all python3-setuptools python3-boto3 \
-  python3-paramiko python3-requests python3-scp python3-tk python3-pytest ruff
+  python3-keyring python3-paramiko python3-requests python3-scp python3-tk python3-pytest ruff
 sudo apt install python3-defusedxml
 python3 -m pytest
 ruff check src tests
@@ -87,7 +124,7 @@ debscp-gui
 
 ## Security model
 
-- Passwords are memory-only and are never written to profile storage.
+- Passwords are excluded from profile JSON and protected by the operating system credential store.
 - Profiles and DebSCP's `known_hosts` file are mode `0600`.
 - System OpenSSH known-host keys are honored.
 - Unknown keys are rejected until the user explicitly reviews and accepts the

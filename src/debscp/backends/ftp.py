@@ -2,6 +2,7 @@ from __future__ import annotations
 
 # Plain FTP is an explicit legacy option; users are warned and FTPS is available.
 import ftplib  # nosec
+import socket
 import ssl
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
@@ -9,6 +10,32 @@ from pathlib import Path, PurePosixPath
 from ..models import RemoteEntry, SessionConfig, normalize_remote_path
 from ..resume import finish_partial, prepare_partial
 from .base import BackendCapabilities, ProgressCallback, RemoteBackend
+
+
+class ImplicitFTP_TLS(ftplib.FTP_TLS):
+    """FTP_TLS variant that negotiates TLS immediately on port 990."""
+
+    def connect(
+        self,
+        host: str = "",
+        port: int = 0,
+        timeout: float = -999,
+        source_address: tuple[str, int] | None = None,
+    ) -> str:
+        if self.sock is not None:
+            raise ftplib.Error("Already connected")
+        self.host = host or self.host
+        self.port = port or self.port
+        if timeout != -999:
+            self.timeout = timeout
+        if source_address is not None:
+            self.source_address = source_address
+        self.sock = socket.create_connection((self.host, self.port), self.timeout, source_address=self.source_address)
+        self.af = self.sock.family
+        self.sock = self.context.wrap_socket(self.sock, server_hostname=self.host)
+        self.file = self.sock.makefile("r", encoding=self.encoding)
+        self.welcome = self.getresp()
+        return self.welcome
 
 
 class FTPBackend(RemoteBackend):
@@ -21,7 +48,9 @@ class FTPBackend(RemoteBackend):
 
     def connect(self) -> None:
         connection: ftplib.FTP
-        if self.config.tls or self.config.protocol == "ftps":
+        if self.config.protocol == "ftps-implicit":
+            connection = ImplicitFTP_TLS(context=ssl.create_default_context())
+        elif self.config.tls or self.config.protocol == "ftps":
             connection = ftplib.FTP_TLS(context=ssl.create_default_context())
         else:
             connection = ftplib.FTP()  # nosec

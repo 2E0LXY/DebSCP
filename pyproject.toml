@@ -4,13 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "debscp"
-version = "0.3.0"
+version = "0.4.0"
 description = "Native Linux multi-protocol file transfer client inspired by WinSCP"
 readme = "README.md"
 requires-python = ">=3.11"
 license = {file = "LICENSE"}
 authors = [{name = "DebSCP contributors"}]
-dependencies = ["boto3>=1.26", "defusedxml>=0.7.1", "paramiko>=2.12", "requests>=2.28", "scp>=0.14"]
+dependencies = ["boto3>=1.26", "defusedxml>=0.7.1", "keyring>=23", "paramiko>=2.12", "requests>=2.28", "scp>=0.14"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: X11 Applications",

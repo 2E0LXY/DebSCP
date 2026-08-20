@@ -4,7 +4,16 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 
-DEFAULT_PORTS = {"sftp": 22, "scp": 22, "ftp": 21, "ftps": 21, "webdav": 80, "webdavs": 443, "s3": 443}
+DEFAULT_PORTS = {
+    "sftp": 22,
+    "scp": 22,
+    "ftp": 21,
+    "ftps": 21,
+    "ftps-implicit": 990,
+    "webdav": 80,
+    "webdavs": 443,
+    "s3": 443,
+}
 
 
 def default_port(protocol: str) -> int:

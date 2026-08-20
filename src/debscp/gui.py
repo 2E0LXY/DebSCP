@@ -8,6 +8,7 @@ from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
+from . import __version__
 from .backends import RemoteBackend, SFTPBackend, UnknownHostKey, create_backend
 from .credentials import CredentialStore
 from .editor import RemoteEditConflict, RemoteEditor
@@ -16,6 +17,13 @@ from .models import DEFAULT_PORTS, RemoteEntry, SessionConfig, normalize_remote_
 from .session_store import SessionStore
 from .sync import SyncDirection, SyncEngine
 from .transfer_queue import TransferJob, TransferQueue, TransferState
+from .updater import (
+    UpdateInfo,
+    check_for_update,
+    download_update,
+    launch_installer_after_exit,
+    verify_debian_package,
+)
 from .winscp_ini import load_winscp_ini
 from .workspaces import WorkspaceStore
 
@@ -37,6 +45,12 @@ class DebSCPWindow(tk.Tk):
         self.local_path = Path.home()
         self.remote_path = "/"
         self.closing = False
+        self.available_update: UpdateInfo | None = None
+        self._update_checking = False
+        self._update_flash_on = False
+        self._update_flash_running = False
+        self._update_helper: object | None = None
+        self._next_update_check: str | None = None
         self._background_threads: set[threading.Thread] = set()
         self._background_lock = threading.Lock()
         self.queue = TransferQueue(self._queue_update)
@@ -44,10 +58,12 @@ class DebSCPWindow(tk.Tk):
         self._build()
         self._load_session_names()
         self._refresh_local()
+        self._next_update_check = self.after(1500, self._check_for_updates)
 
     def _build(self) -> None:
         style = ttk.Style(self)
         style.configure("Treeview", rowheight=25)
+        style.configure("Update.TButton", foreground="#b53a00")
         connection = ttk.LabelFrame(self, text=_("Connection"), padding=8)
         connection.pack(fill="x", padx=10, pady=(10, 6))
         self.session_name = tk.StringVar()
@@ -143,7 +159,15 @@ class DebSCPWindow(tk.Tk):
         self.transfer_tree.column("state", width=100, stretch=False)
         self.transfer_tree.pack(fill="x")
         self.status = tk.StringVar(value=_("Ready"))
-        ttk.Label(self, textvariable=self.status, anchor="w").pack(fill="x", padx=12, pady=(0, 8))
+        status_bar = ttk.Frame(self)
+        status_bar.pack(fill="x", padx=12, pady=(0, 8))
+        ttk.Label(status_bar, textvariable=self.status, anchor="w").pack(side="left", fill="x", expand=True)
+        self.update_button = ttk.Button(
+            status_bar,
+            text="Check for updates",
+            command=self._update_clicked,
+        )
+        self.update_button.pack(side="right")
 
     def _pane(
         self,
@@ -360,6 +384,125 @@ class DebSCPWindow(tk.Tk):
         with self._background_lock:
             self._background_threads.add(worker)
         worker.start()
+
+    def _check_for_updates(self, manual: bool = False) -> None:
+        if self.closing or self._update_checking:
+            return
+        if self._next_update_check:
+            self.after_cancel(self._next_update_check)
+            self._next_update_check = None
+        self._update_checking = True
+        self.update_button.configure(state="disabled", text="Checking…")
+
+        def check() -> None:
+            try:
+                update = check_for_update(__version__)
+            except Exception as exc:  # noqa: BLE001 - an update failure must never disrupt file transfers
+                self.after(0, self._update_check_finished, None, exc, manual)
+            else:
+                self.after(0, self._update_check_finished, update, None, manual)
+
+        self._background(check)
+
+    def _update_check_finished(
+        self,
+        update: UpdateInfo | None,
+        error: Exception | None,
+        manual: bool,
+    ) -> None:
+        self._update_checking = False
+        if self.closing:
+            return
+        if error:
+            self.update_button.configure(state="normal", text="Check for updates", style="TButton")
+            if manual:
+                messagebox.showerror("Update check failed", str(error), parent=self)
+        elif update:
+            self.available_update = update
+            self.update_button.configure(state="normal", style="Update.TButton")
+            if not self._update_flash_running:
+                self._update_flash_running = True
+                self._flash_update_button()
+        else:
+            self.available_update = None
+            self.update_button.configure(state="normal", text="Up to date", style="TButton")
+            if manual:
+                messagebox.showinfo("DebSCP update", f"DebSCP {__version__} is up to date.", parent=self)
+            self.after(3000, self._restore_update_button)
+        self._next_update_check = self.after(6 * 60 * 60 * 1000, self._check_for_updates)
+
+    def _restore_update_button(self) -> None:
+        if not self.closing and not self.available_update and not self._update_checking:
+            self.update_button.configure(text="Check for updates")
+
+    def _flash_update_button(self) -> None:
+        if self.closing or not self.available_update:
+            self._update_flash_running = False
+            return
+        if self._update_checking:
+            self.after(650, self._flash_update_button)
+            return
+        self._update_flash_on = not self._update_flash_on
+        text = (
+            f"● Update v{self.available_update.version}"
+            if self._update_flash_on
+            else f"Update available: v{self.available_update.version}"
+        )
+        self.update_button.configure(text=text)
+        self.after(650, self._flash_update_button)
+
+    def _update_clicked(self) -> None:
+        if not self.available_update:
+            self._check_for_updates(manual=True)
+            return
+        update = self.available_update
+        size_mib = update.size / (1024 * 1024)
+        if not messagebox.askyesno(
+            "Install DebSCP update",
+            f"Download and install DebSCP {update.version} ({size_mib:.1f} MiB)?\n\n"
+            "The package will be verified before PolicyKit asks for administrator approval. "
+            "DebSCP will close before the installer starts.",
+            parent=self,
+        ):
+            return
+        self.update_button.configure(state="disabled", text="Downloading…")
+        self.status.set(f"Downloading DebSCP {update.version}…")
+
+        def progress(received: int, total: int) -> None:
+            percent = int(received * 100 / total)
+            if not self.closing:
+                self.after(0, self.status.set, f"Downloading DebSCP {update.version}: {percent}%")
+
+        def fetch() -> None:
+            try:
+                package = download_update(update, progress=progress)
+                verify_debian_package(package, update)
+            except Exception as exc:  # noqa: BLE001 - restore the update control after any download failure
+                self.after(0, self._update_download_failed, exc)
+            else:
+                self.after(0, self._launch_update, package, update)
+
+        self._background(fetch)
+
+    def _update_download_failed(self, error: Exception) -> None:
+        if self.closing:
+            return
+        self.update_button.configure(state="normal")
+        self.status.set("Update download or verification failed")
+        messagebox.showerror("Cannot install update", str(error), parent=self)
+
+    def _launch_update(self, package: Path, update: UpdateInfo) -> None:
+        if self.closing:
+            return
+        try:
+            self._update_helper = launch_installer_after_exit(package, update)
+        except (OSError, RuntimeError, ValueError) as exc:
+            self.update_button.configure(state="normal")
+            self.status.set("Update installation could not start")
+            messagebox.showerror("Cannot install update", str(exc), parent=self)
+            return
+        self.status.set(f"Installing DebSCP {update.version}; closing…")
+        self._close()
 
     def _queue_update(self, job: TransferJob) -> None:
         if not self.closing:

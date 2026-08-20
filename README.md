@@ -5,7 +5,7 @@ workflow of WinSCP. It provides a dual-pane file manager, SFTP, SCP, FTP/FTPS,
 WebDAV and S3 backends, synchronization, remote editing, saved workspaces,
 automation, and Debian packaging without Wine or Windows libraries.
 
-> **Project status:** v0.4.0 implements every capability category in the port
+> **Project status:** v0.5.0 implements every capability category in the port
 > matrix. It is still an independent implementation, so protocol edge cases
 > and UI details can differ from WinSCP. See the [compatibility matrix](docs/PORT_STATUS.md).
 > DebSCP is an independent project and is not affiliated with or endorsed by
@@ -30,13 +30,14 @@ automation, and Debian packaging without Wine or Windows libraries.
 - Linux file-manager “Send with DebSCP” action
 - Spanish and French gettext translations
 - Reproducible Debian source package and `.deb` CI/release builds
+- Background release checks and a flashing, one-click verified `.deb` updater
 
 ## Install a release
 
 Download the `.deb` from [GitHub Releases](https://github.com/2E0LXY/DebSCP/releases) and run:
 
 ```sh
-sudo apt install ./debscp_0.4.0_all.deb
+sudo apt install ./debscp_0.5.0_all.deb
 ```
 
 Launch **DebSCP** from the application menu, run `debscp-gui`, or use the CLI:
@@ -59,6 +60,27 @@ printf '%s\n' "$SFTP_PASSWORD" | debscp ls production / --password-stdin
 
 The CLI refuses unknown host keys. Review and trust a new server key once in
 the GUI, after independently verifying its fingerprint.
+
+## Automatic updates
+
+DebSCP checks the latest stable GitHub Release shortly after startup and every
+six hours while it remains open. When a newer `vMAJOR.MINOR.PATCH` tag has a
+matching `debscp_VERSION_all.deb` asset, the **Update available** button in the
+status bar flashes. The same button can be used to check manually.
+
+Select the flashing button and confirm once. DebSCP downloads the package,
+requires its size and GitHub-published SHA-256 digest to match, and verifies the
+package name, version, and architecture with `dpkg-deb`. It then closes DebSCP;
+a small detached helper re-verifies the file and launches `apt-get` through
+PolicyKit only after the app has exited. The desktop's administrator approval
+prompt completes the installation. Network failures do not interrupt
+connections or transfers. Automatic installation is Linux-only and requires
+the `pkexec`, `apt-get`, and `dpkg-deb` commands supplied by a normal Debian or
+Ubuntu installation.
+
+Version 0.5.0 is the first release containing the updater, so existing v0.4.0
+installations need to install the v0.5.0 `.deb` manually once. Updates released
+after v0.5.0 can then be installed from the flashing in-app button.
 
 ## Import sites from a WinSCP backup
 
@@ -133,6 +155,8 @@ debscp-gui
 - WebDAV XML is parsed without entity expansion and oversized listings are rejected.
 - Plain FTP is available for legacy servers but is unencrypted; prefer FTPS or SFTP.
 - Resumed downloads are accepted only when server metadata still identifies the same source object.
+- Automatic updates accept only the expected HTTPS GitHub release asset, enforce a 100 MiB limit,
+  verify GitHub's SHA-256 digest and Debian package metadata, and invoke fixed absolute installer paths without a shell.
 
 This is early software. Review changes carefully before using it against
 important systems and keep independent backups.

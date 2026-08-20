@@ -9,7 +9,7 @@ Homepage: https://github.com/2E0LXY/DebSCP
 
 Package: debscp
 Architecture: all
-Depends: ${misc:Depends}, ${python3:Depends}, openssh-client, python3-boto3, python3-defusedxml, python3-keyring, python3-paramiko, python3-requests, python3-scp, python3-tk
+Depends: ${misc:Depends}, ${python3:Depends}, openssh-client, pkexec, python3-boto3, python3-defusedxml, python3-keyring, python3-paramiko, python3-requests, python3-scp, python3-tk
 Description: native Linux multi-protocol file transfer client
  DebSCP provides saved non-secret session profiles, strict SSH host-key
  verification, SFTP, SCP, FTP/FTPS, WebDAV and S3 backends, synchronization,

@@ -4,6 +4,15 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import PurePosixPath
 
+DEFAULT_PORTS = {"sftp": 22, "scp": 22, "ftp": 21, "ftps": 21, "webdav": 80, "webdavs": 443, "s3": 443}
+
+
+def default_port(protocol: str) -> int:
+    try:
+        return DEFAULT_PORTS[protocol.lower()]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported protocol: {protocol}") from exc
+
 
 @dataclass(slots=True)
 class SessionConfig:
@@ -25,11 +34,12 @@ class SessionConfig:
 
     @classmethod
     def from_dict(cls, value: dict[str, object]) -> SessionConfig:
+        port = value.get("port", 22)
         return cls(
             name=str(value["name"]),
             host=str(value["host"]),
             username=str(value["username"]),
-            port=int(value.get("port", 22)),
+            port=int(str(port)),
             key_file=str(value["key_file"]) if value.get("key_file") else None,
             remote_path=str(value.get("remote_path", "/")),
             protocol=str(value.get("protocol", "sftp")).lower(),

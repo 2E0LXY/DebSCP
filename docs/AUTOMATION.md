@@ -43,12 +43,10 @@ with Client("production") as client:
     for entry in client.list("/srv/app"):
         print(entry.name, entry.size)
     client.put("release.tar.gz", "/srv/app/release.tar.gz")
-    checklist = client.synchronize(
-        "./config", "/srv/app/config", SyncDirection.UPLOAD, apply=False
-    )
+    checklist = client.synchronize("./config", "/srv/app/config", SyncDirection.UPLOAD, apply=False)
 ```
 
 `Client` accepts either a saved session name or a `SessionConfig` instance.
-Its current stable methods are `open`, `close`, `list`, `get`, `put`, `remove`,
-and `synchronize`.
-
+Its stable methods are `open`, `close`, `list`, `get`, `put`, `remove`,
+`remove_tree`, `mkdir`, `rename`, `edit`, `synchronize`, and `keep_up_to_date`.
+The `capabilities` property reports protocol-specific transfer behavior.

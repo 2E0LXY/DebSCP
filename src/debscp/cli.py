@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 from . import __version__
 from .backends import UnknownHostKey, create_backend
 from .editor import RemoteEditConflict, RemoteEditor
-from .models import SessionConfig
+from .models import SessionConfig, default_port
 from .policies import PresetStore, TransferPreset
 from .session_store import SessionStore
 from .sync import SyncDirection, SyncEngine
@@ -124,21 +124,15 @@ def _progress(current: int, total: int) -> None:
     print(f"\r{percent:3d}%  {current}/{total} bytes", end="", file=sys.stderr, flush=True)
 
 
-def _remove_tree(backend, path: str) -> None:
-    for entry in backend.listdir(path):
-        if entry.is_dir:
-            _remove_tree(backend, entry.path)
-        else:
-            backend.remove(entry.path)
-    backend.remove(path, directory=True)
-
-
 def _run_remote(args: argparse.Namespace) -> int:
     backend = create_backend(_session(args.session), _password(args))
     try:
         backend.connect()
     except UnknownHostKey as exc:
-        _emit({"error": str(exc), "code": int(ExitCode.UNKNOWN_HOST_KEY)} if args.json else str(exc), json_output=args.json)
+        _emit(
+            {"error": str(exc), "code": int(ExitCode.UNKNOWN_HOST_KEY)} if args.json else str(exc),
+            json_output=args.json,
+        )
         return ExitCode.UNKNOWN_HOST_KEY
     except Exception as exc:
         raise DebSCPConnectionError(str(exc)) from exc
@@ -146,7 +140,9 @@ def _run_remote(args: argparse.Namespace) -> int:
         if args.command == "ls":
             entries = backend.listdir(args.paths[0])
             if args.json:
-                _emit([{**asdict(entry), "modified": entry.modified.isoformat()} for entry in entries], json_output=True)
+                _emit(
+                    [{**asdict(entry), "modified": entry.modified.isoformat()} for entry in entries], json_output=True
+                )
             else:
                 for entry in entries:
                     kind = "d" if entry.is_dir else "-"
@@ -154,13 +150,17 @@ def _run_remote(args: argparse.Namespace) -> int:
         elif args.command == "get":
             if len(args.paths) != 2:
                 raise ValueError("get requires REMOTE LOCAL")
-            operation = backend.download_tree if args.recursive else backend.download
-            operation(args.paths[0], Path(args.paths[1]), None if args.json else _progress)
+            if args.recursive:
+                backend.download_tree(args.paths[0], Path(args.paths[1]), None if args.json else _progress)
+            else:
+                backend.download(args.paths[0], Path(args.paths[1]), None if args.json else _progress)
         elif args.command == "put":
             if len(args.paths) != 2:
                 raise ValueError("put requires LOCAL REMOTE")
-            operation = backend.upload_tree if args.recursive else backend.upload
-            operation(Path(args.paths[0]), args.paths[1], None if args.json else _progress)
+            if args.recursive:
+                backend.upload_tree(Path(args.paths[0]), args.paths[1], None if args.json else _progress)
+            else:
+                backend.upload(Path(args.paths[0]), args.paths[1], None if args.json else _progress)
         elif args.command == "mkdir":
             backend.mkdir(args.paths[0])
         elif args.command == "rm":
@@ -168,7 +168,7 @@ def _run_remote(args: argparse.Namespace) -> int:
             parent = str(PurePosixPath(entry_path).parent)
             match = next((item for item in backend.listdir(parent) if item.path == entry_path), None)
             if args.recursive and match and match.is_dir:
-                _remove_tree(backend, entry_path)
+                backend.remove_tree(entry_path)
             else:
                 backend.remove(entry_path, directory=bool(match and match.is_dir))
         elif args.command == "rename":
@@ -198,7 +198,9 @@ def _run_sync(args: argparse.Namespace) -> int:
         if args.watch:
             engine.keep_up_to_date(args.local, args.remote, args.interval, presets[args.preset])
             return ExitCode.OK
-        actions = engine.compare(args.local, args.remote, SyncDirection(args.direction), presets[args.preset], delete=args.delete)
+        actions = engine.compare(
+            args.local, args.remote, SyncDirection(args.direction), presets[args.preset], delete=args.delete
+        )
         result = [asdict(item) for item in actions]
         text = "\n".join(f"{item.operation.value:14} {item.relative_path} — {item.reason}" for item in actions)
         _emit(result if args.json else text, json_output=args.json)
@@ -225,10 +227,6 @@ def _run_batch(args: argparse.Namespace) -> int:
     return result
 
 
-def _default_port(protocol: str) -> int:
-    return {"sftp": 22, "scp": 22, "ftp": 21, "ftps": 21, "webdav": 80, "webdavs": 443, "s3": 443}[protocol]
-
-
 class DebSCPConnectionError(RuntimeError):
     pass
 
@@ -238,17 +236,32 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if not args.command or args.command == "gui":
             from .gui import main as gui_main
+
             gui_main()
         elif args.command == "sessions":
             sessions = SessionStore().load()
-            text = "\n".join(f"{item.name}\t{item.protocol}\t{item.username}@{item.host}:{item.port}" for item in sessions)
+            text = "\n".join(
+                f"{item.name}\t{item.protocol}\t{item.username}@{item.host}:{item.port}" for item in sessions
+            )
             _emit([item.to_dict() for item in sessions] if args.json else text, json_output=args.json)
         elif args.command == "save":
             username = args.user if args.user is not None else ("" if args.protocol == "s3" else getpass.getuser())
-            SessionStore().upsert(SessionConfig(
-                args.name, args.host, username, args.port or _default_port(args.protocol), args.key, args.remote_path,
-                args.protocol, args.tls, args.endpoint_url, args.region, args.proxy_command, args.jump_host,
-            ))
+            SessionStore().upsert(
+                SessionConfig(
+                    args.name,
+                    args.host,
+                    username,
+                    args.port or default_port(args.protocol),
+                    args.key,
+                    args.remote_path,
+                    args.protocol,
+                    args.tls,
+                    args.endpoint_url,
+                    args.region,
+                    args.proxy_command,
+                    args.jump_host,
+                )
+            )
         elif args.command == "delete-session":
             SessionStore().delete(args.name)
         elif args.command in ("ls", "get", "put", "mkdir", "rm", "rename"):
@@ -267,7 +280,10 @@ def main(argv: list[str] | None = None) -> int:
                 changed = RemoteEditor(backend).edit(args.remote, args.editor)
             finally:
                 backend.close()
-            _emit({"changed": changed} if args.json else ("Uploaded changes" if changed else "No changes"), json_output=args.json)
+            _emit(
+                {"changed": changed} if args.json else ("Uploaded changes" if changed else "No changes"),
+                json_output=args.json,
+            )
         elif args.command == "preset-save":
             store = PresetStore()
             presets = [item for item in store.load() if item.name != args.name]
@@ -275,7 +291,10 @@ def main(argv: list[str] | None = None) -> int:
             store.save(presets)
         elif args.command == "presets":
             presets = PresetStore().load()
-            _emit([asdict(item) for item in presets] if args.json else "\n".join(item.name for item in presets), json_output=args.json)
+            _emit(
+                [asdict(item) for item in presets] if args.json else "\n".join(item.name for item in presets),
+                json_output=args.json,
+            )
         elif args.command == "workspace-save":
             known = {item.name for item in SessionStore().load()}
             unknown = set(args.sessions) - known
@@ -290,10 +309,14 @@ def main(argv: list[str] | None = None) -> int:
             return int(_run_batch(args))
         elif args.command == "send":
             from .shell import send_files
+
             return send_files(args.paths)
         return int(ExitCode.OK)
     except UnknownHostKey as exc:
-        _emit({"error": str(exc), "code": int(ExitCode.UNKNOWN_HOST_KEY)} if args.json else str(exc), json_output=args.json)
+        _emit(
+            {"error": str(exc), "code": int(ExitCode.UNKNOWN_HOST_KEY)} if args.json else str(exc),
+            json_output=args.json,
+        )
         return int(ExitCode.UNKNOWN_HOST_KEY)
     except DebSCPConnectionError as exc:
         _emit({"error": str(exc), "code": int(ExitCode.CONNECTION)} if args.json else str(exc), json_output=args.json)

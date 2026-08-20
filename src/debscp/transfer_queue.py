@@ -33,18 +33,29 @@ class TransferQueue:
         self.jobs: dict[str, TransferJob] = {}
         self._queue: queue.Queue[TransferJob | None] = queue.Queue()
         self._on_update = on_update or (lambda _job: None)
+        self._closed = False
         self._worker = threading.Thread(target=self._run, name="debscp-transfers", daemon=True)
         self._worker.start()
 
     def submit(self, job: TransferJob) -> str:
+        if self._closed:
+            raise RuntimeError("Transfer queue is closed")
         self.jobs[job.id] = job
         self._queue.put(job)
         self._notify(job)
         return job.id
 
     def shutdown(self) -> None:
+        """Drain queued work before returning so callers may safely close shared backends."""
+        if self._closed:
+            return
+        self._closed = True
         self._queue.put(None)
-        self._worker.join(timeout=5)
+        self._worker.join()
+
+    @property
+    def active(self) -> bool:
+        return any(job.state in (TransferState.QUEUED, TransferState.RUNNING) for job in self.jobs.values())
 
     def _notify(self, job: TransferJob) -> None:
         self._on_update(job)

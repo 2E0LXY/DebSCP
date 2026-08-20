@@ -40,4 +40,3 @@ class PresetStore:
         temporary.write_text(json.dumps([asdict(item) for item in presets], indent=2) + "\n", encoding="utf-8")
         os.chmod(temporary, 0o600)
         temporary.replace(self.path)
-

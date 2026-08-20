@@ -34,4 +34,3 @@ class WorkspaceStore:
         workspaces = self.load()
         workspaces.pop(name, None)
         self.save(workspaces)
-

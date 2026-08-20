@@ -13,7 +13,8 @@ ProgressCallback = Callable[[int, int], None]
 
 @dataclass(frozen=True, slots=True)
 class BackendCapabilities:
-    resume: bool = False
+    download_resume: bool = False
+    upload_resume: bool = False
     atomic_upload: bool = False
     recursive: bool = False
     permissions: bool = False
@@ -60,16 +61,21 @@ class RemoteBackend(ABC):
                 self.download(entry.path, destination, progress)
 
     def upload_tree(self, local: Path, remote: str, progress: ProgressCallback | None = None) -> None:
-        try:
-            self.mkdir(remote)
-        except OSError:
-            pass
+        self.mkdir(remote)
         for item in local.iterdir():
             destination = remote.rstrip("/") + "/" + item.name
             if item.is_dir():
                 self.upload_tree(item, destination, progress)
             else:
                 self.upload(item, destination, progress)
+
+    def remove_tree(self, remote: str) -> None:
+        for entry in self.listdir(remote):
+            if entry.is_dir:
+                self.remove_tree(entry.path)
+            else:
+                self.remove(entry.path)
+        self.remove(remote, directory=True)
 
     def __enter__(self) -> Self:
         self.connect()

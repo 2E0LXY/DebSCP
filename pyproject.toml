@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "debscp"
-version = "0.2.0"
+version = "0.3.0"
 description = "Native Linux multi-protocol file transfer client inspired by WinSCP"
 readme = "README.md"
 requires-python = ">=3.11"
-license = {file = "LICENSE"}
+license = "GPL-3.0-only"
+license-files = ["LICENSE"]
 authors = [{name = "DebSCP contributors"}]
-dependencies = ["boto3>=1.26", "paramiko>=2.12", "requests>=2.28", "scp>=0.14"]
+dependencies = ["boto3>=1.26", "defusedxml>=0.7.1", "paramiko>=2.12", "requests>=2.28", "scp>=0.14"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: X11 Applications",
@@ -20,7 +21,7 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest>=8", "ruff>=0.8"]
+test = ["bandit>=1.7", "build>=1.2", "mypy>=1.10", "pytest>=8", "ruff>=0.8"]
 
 [project.scripts]
 debscp = "debscp.cli:main"
@@ -42,3 +43,6 @@ addopts = "-q"
 [tool.ruff]
 line-length = 120
 target-version = "py311"
+
+[tool.mypy]
+ignore_missing_imports = true

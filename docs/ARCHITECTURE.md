@@ -26,19 +26,19 @@ flowchart TD
 ## Backend contract
 
 `RemoteBackend` presents listing, upload, download, create, delete, rename, and
-recursive tree operations. `BackendCapabilities` records resume, atomic-upload,
+recursive tree operations. `BackendCapabilities` records download and upload resume separately, atomic-upload,
 recursive, permission, and symlink behavior. Protocol adapters preserve native
 semantics rather than claiming that FTP directories and S3 prefixes are POSIX
 filesystems.
 
-- SFTP uses Paramiko and implements resumed local temporary downloads and
-  resumed remote temporary uploads followed by atomic rename.
+- SFTP uses Paramiko and implements identity-validated local temporary downloads
+  and fresh remote temporary uploads followed by atomic rename.
 - SCP uses the SCP data protocol while sharing the verified SSH connection and
-  SFTP management channel for browsing and metadata operations.
+  SFTP management where available, with SSH-command management fallback for SCP-only servers.
 - FTP uses MLSD and REST; FTPS uses the platform CA trust store and encrypted
   data connections.
-- WebDAV uses standard OPTIONS, PROPFIND, GET, ranged GET, PUT, MKCOL, MOVE and
-  DELETE methods with TLS validation through Requests.
+- WebDAV uses hardened XML parsing plus standard OPTIONS, PROPFIND, GET, ranged
+  GET, PUT, MKCOL, MOVE and DELETE methods with TLS validation through Requests.
 - S3 supports AWS and custom endpoints, paginated prefix browsing, multipart
   upload, ranged download, copy/delete rename, and recursive prefix operations.
 
@@ -59,4 +59,3 @@ The GUI can keep multiple live connections and switch them through tabs.
 Workspaces persist groups of profile names rather than credentials. CLI batch
 mode, structured JSON, stable exit codes, and `debscp.Client` provide automation
 without the Windows-only .NET process bridge.
-

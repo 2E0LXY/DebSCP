@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import ftplib
+# Plain FTP is an explicit legacy option; users are warned and FTPS is available.
+import ftplib  # nosec
 import ssl
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 
 from ..models import RemoteEntry, SessionConfig, normalize_remote_path
+from ..resume import finish_partial, prepare_partial
 from .base import BackendCapabilities, ProgressCallback, RemoteBackend
 
 
 class FTPBackend(RemoteBackend):
-    capabilities = BackendCapabilities(resume=True, atomic_upload=True, recursive=True)
+    capabilities = BackendCapabilities(download_resume=True, atomic_upload=True, recursive=True)
 
     def __init__(self, config: SessionConfig, password: str | None = None) -> None:
         self.config = config
@@ -18,10 +20,11 @@ class FTPBackend(RemoteBackend):
         self.ftp: ftplib.FTP | None = None
 
     def connect(self) -> None:
+        connection: ftplib.FTP
         if self.config.tls or self.config.protocol == "ftps":
             connection = ftplib.FTP_TLS(context=ssl.create_default_context())
         else:
-            connection = ftplib.FTP()
+            connection = ftplib.FTP()  # nosec
         connection.connect(self.config.host, self.config.port, timeout=20)
         connection.login(self.config.username, self.password)
         if isinstance(connection, ftplib.FTP_TLS):
@@ -53,48 +56,64 @@ class FTPBackend(RemoteBackend):
             except ValueError:
                 timestamp = datetime.fromtimestamp(0, UTC).astimezone()
             kind = facts.get("type", "file")
-            entries.append(RemoteEntry(
-                name=name, path=str(PurePosixPath(base, name)), size=int(facts.get("size", 0)),
-                modified=timestamp, mode=int(facts.get("unix.mode", "0"), 8), is_dir=kind in ("dir", "cdir", "pdir"),
-            ))
+            entries.append(
+                RemoteEntry(
+                    name=name,
+                    path=str(PurePosixPath(base, name)),
+                    size=int(facts.get("size", 0)),
+                    modified=timestamp,
+                    mode=int(facts.get("unix.mode", "0"), 8),
+                    is_dir=kind in ("dir", "cdir", "pdir"),
+                )
+            )
         return sorted(entries, key=lambda entry: (not entry.is_dir, entry.name.casefold()))
 
     def download(self, remote: str, local: Path, progress: ProgressCallback | None = None) -> None:
         remote_path = normalize_remote_path(remote)
         local.parent.mkdir(parents=True, exist_ok=True)
         temporary = local.with_name(local.name + ".debscp-part")
-        offset = temporary.stat().st_size if temporary.exists() else 0
-        total = self._connection().size(remote_path) or 0
-        if offset > total:
-            temporary.unlink()
-            offset = 0
+        connection = self._connection()
+        connection.voidcmd("TYPE I")
+        total = connection.size(remote_path) or 0
+        try:
+            modified = connection.sendcmd(f"MDTM {remote_path}")
+        except ftplib.Error:
+            modified = None
+        identity = {"protocol": "ftp", "path": remote_path, "size": total, "modified": modified} if modified else None
+        offset = prepare_partial(temporary, identity, total)
+        if offset == total:
+            finish_partial(temporary, local)
+            return
         transferred = offset
         with temporary.open("ab") as destination:
+
             def consume(chunk: bytes) -> None:
                 nonlocal transferred
                 destination.write(chunk)
                 transferred += len(chunk)
                 if progress:
                     progress(transferred, total)
-            self._connection().retrbinary(f"RETR {remote_path}", consume, rest=offset or None)
-        temporary.replace(local)
+
+            connection.retrbinary(f"RETR {remote_path}", consume, rest=offset or None)
+        finish_partial(temporary, local)
 
     def upload(self, local: Path, remote: str, progress: ProgressCallback | None = None) -> None:
         remote_path = normalize_remote_path(remote)
         temporary = remote_path + ".debscp-part"
         try:
-            offset = self._connection().size(temporary) or 0
+            self._connection().delete(temporary)
         except ftplib.Error:
-            offset = 0
-        total, transferred = local.stat().st_size, offset
+            pass
+        total, transferred = local.stat().st_size, 0
         with local.open("rb") as source:
-            source.seek(offset)
+
             def report(chunk: bytes) -> None:
                 nonlocal transferred
                 transferred += len(chunk)
                 if progress:
                     progress(transferred, total)
-            self._connection().storbinary(f"STOR {temporary}", source, callback=report, rest=offset or None)
+
+            self._connection().storbinary(f"STOR {temporary}", source, callback=report)
         try:
             self._connection().delete(remote_path)
         except ftplib.Error:
@@ -102,7 +121,18 @@ class FTPBackend(RemoteBackend):
         self._connection().rename(temporary, remote_path)
 
     def mkdir(self, path: str) -> None:
-        self._connection().mkd(normalize_remote_path(path))
+        connection = self._connection()
+        normalized = normalize_remote_path(path)
+        try:
+            connection.mkd(normalized)
+        except ftplib.Error as error:
+            current = connection.pwd()
+            try:
+                connection.cwd(normalized)
+            except ftplib.Error:
+                raise error
+            finally:
+                connection.cwd(current)
 
     def remove(self, path: str, *, directory: bool = False) -> None:
         normalized = normalize_remote_path(path)
@@ -112,4 +142,3 @@ class FTPBackend(RemoteBackend):
 
     def rename(self, source: str, destination: str) -> None:
         self._connection().rename(normalize_remote_path(source), normalize_remote_path(destination))
-

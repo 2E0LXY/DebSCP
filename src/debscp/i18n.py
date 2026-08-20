@@ -17,4 +17,3 @@ def translation(language: str | None = None) -> gettext.NullTranslations:
 
 
 _ = translation().gettext
-

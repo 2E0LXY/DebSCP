@@ -14,4 +14,3 @@ def test_preset_store_round_trip(tmp_path) -> None:
     values = [TransferPreset("docs", ["*.md"], ["private*"])]
     store.save(values)
     assert store.load() == values
-

@@ -14,7 +14,7 @@ def parse_po(path: Path) -> dict[str, str]:
     msgid: list[str] = []
     msgstr: list[str] = []
     section: list[str] | None = None
-    for raw in path.read_text(encoding="utf-8").splitlines() + ["msgid \"\""]:
+    for raw in path.read_text(encoding="utf-8").splitlines() + ['msgid ""']:
         line = raw.strip()
         if line.startswith("msgid "):
             if msgid and msgstr:
@@ -66,4 +66,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

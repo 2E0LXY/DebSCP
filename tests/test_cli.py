@@ -24,4 +24,3 @@ def test_batch_executes_multiple_commands(tmp_path, monkeypatch) -> None:
     batch.write_text("save one host.test --user user\nsave two bucket --protocol s3\n")
     assert main(["batch", str(batch)]) == ExitCode.OK
     assert main(["workspace-save", "pair", "one", "two"]) == ExitCode.OK
-

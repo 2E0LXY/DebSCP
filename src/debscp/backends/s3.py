@@ -7,11 +7,12 @@ import boto3
 from boto3.s3.transfer import TransferConfig
 
 from ..models import RemoteEntry, SessionConfig, normalize_remote_path
+from ..resume import finish_partial, prepare_partial
 from .base import BackendCapabilities, ProgressCallback, RemoteBackend
 
 
 class S3Backend(RemoteBackend):
-    capabilities = BackendCapabilities(resume=True, atomic_upload=True, recursive=True)
+    capabilities = BackendCapabilities(download_resume=True, atomic_upload=True, recursive=True)
 
     def __init__(self, config: SessionConfig, password: str | None = None) -> None:
         self.config = config
@@ -34,8 +35,9 @@ class S3Backend(RemoteBackend):
             kwargs["endpoint_url"] = self.config.endpoint_url
         if self.config.region:
             kwargs["region_name"] = self.config.region
-        self.client = boto3.client("s3", **kwargs)
-        self.client.head_bucket(Bucket=self.bucket)
+        client = boto3.client("s3", **kwargs)
+        client.head_bucket(Bucket=self.bucket)
+        self.client = client
 
     def _connection(self):
         if self.client is None:
@@ -65,7 +67,12 @@ class S3Backend(RemoteBackend):
                     continue
                 name = PurePosixPath(key).name
                 entries[name] = RemoteEntry(
-                    name, "/" + key, int(item["Size"]), item["LastModified"].astimezone(), 0, False,
+                    name,
+                    "/" + key,
+                    int(item["Size"]),
+                    item["LastModified"].astimezone(),
+                    0,
+                    False,
                 )
         return sorted(entries.values(), key=lambda entry: (not entry.is_dir, entry.name.casefold()))
 
@@ -73,11 +80,20 @@ class S3Backend(RemoteBackend):
         key = self._key(remote)
         local.parent.mkdir(parents=True, exist_ok=True)
         temporary = local.with_name(local.name + ".debscp-part")
-        total = int(self._connection().head_object(Bucket=self.bucket, Key=key)["ContentLength"])
-        offset = temporary.stat().st_size if temporary.exists() else 0
-        if offset > total:
-            temporary.unlink()
-            offset = 0
+        details = self._connection().head_object(Bucket=self.bucket, Key=key)
+        total = int(details["ContentLength"])
+        identity = {
+            "protocol": "s3",
+            "bucket": self.bucket,
+            "key": key,
+            "size": total,
+            "etag": str(details.get("ETag", "")),
+            "version": str(details.get("VersionId", "")),
+        }
+        offset = prepare_partial(temporary, identity, total)
+        if offset == total:
+            finish_partial(temporary, local)
+            return
         request = {"Bucket": self.bucket, "Key": key}
         if offset:
             request["Range"] = f"bytes={offset}-"
@@ -89,21 +105,29 @@ class S3Backend(RemoteBackend):
                 transferred += len(chunk)
                 if progress:
                     progress(transferred, total)
-        temporary.replace(local)
+        finish_partial(temporary, local)
 
     def upload(self, local: Path, remote: str, progress: ProgressCallback | None = None) -> None:
         key = self._key(remote)
         temporary = key + ".debscp-part"
         total, transferred = local.stat().st_size, 0
+
         def report(amount: int) -> None:
             nonlocal transferred
             transferred += amount
             if progress:
                 progress(transferred, total)
+
         self._connection().upload_file(
-            str(local), self.bucket, temporary, Callback=report, Config=self.transfer_config,
+            str(local),
+            self.bucket,
+            temporary,
+            Callback=report,
+            Config=self.transfer_config,
         )
-        self._connection().copy_object(Bucket=self.bucket, Key=key, CopySource={"Bucket": self.bucket, "Key": temporary})
+        self._connection().copy_object(
+            Bucket=self.bucket, Key=key, CopySource={"Bucket": self.bucket, "Key": temporary}
+        )
         self._connection().delete_object(Bucket=self.bucket, Key=temporary)
 
     def mkdir(self, path: str) -> None:
@@ -135,15 +159,20 @@ class S3Backend(RemoteBackend):
         ]
         if objects:
             for key in objects:
-                destination_key = new_prefix + key[len(old_prefix):]
+                destination_key = new_prefix + key[len(old_prefix) :]
                 self._connection().copy_object(
-                    Bucket=self.bucket, Key=destination_key, CopySource={"Bucket": self.bucket, "Key": key},
+                    Bucket=self.bucket,
+                    Key=destination_key,
+                    CopySource={"Bucket": self.bucket, "Key": key},
                 )
             self._connection().delete_objects(
-                Bucket=self.bucket, Delete={"Objects": [{"Key": key} for key in objects]},
+                Bucket=self.bucket,
+                Delete={"Objects": [{"Key": key} for key in objects]},
             )
         else:
             self._connection().copy_object(
-                Bucket=self.bucket, Key=new_key, CopySource={"Bucket": self.bucket, "Key": old_key},
+                Bucket=self.bucket,
+                Key=new_key,
+                CopySource={"Bucket": self.bucket, "Key": old_key},
             )
             self._connection().delete_object(Bucket=self.bucket, Key=old_key)

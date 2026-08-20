@@ -1,3 +1,13 @@
+debscp (0.3.0) unstable; urgency=medium
+
+  * Validate partial-transfer identity before resuming downloads.
+  * Fix synchronization conflicts, deletion ordering, and watch re-uploads.
+  * Preserve advanced profiles and bind queued work to its originating tab.
+  * Add SCP-only management fallback, recursive GUI operations, and API methods.
+  * Harden WebDAV XML parsing and improve FTP/WebDAV compatibility.
+
+ -- DebSCP contributors <noreply@github.com>  Thu, 20 Aug 2026 17:00:00 +0100
+
 debscp (0.2.0) unstable; urgency=medium
 
   * Add complete multi-protocol and automation feature set.

@@ -4,13 +4,14 @@ import os
 import threading
 import tkinter as tk
 from collections.abc import Callable
+from dataclasses import replace
 from pathlib import Path, PurePosixPath
 from tkinter import messagebox, simpledialog, ttk
 
 from .backends import RemoteBackend, SFTPBackend, UnknownHostKey, create_backend
 from .editor import RemoteEditConflict, RemoteEditor
 from .i18n import _
-from .models import RemoteEntry, SessionConfig, normalize_remote_path
+from .models import DEFAULT_PORTS, RemoteEntry, SessionConfig, normalize_remote_path
 from .session_store import SessionStore
 from .sync import SyncDirection, SyncEngine
 from .transfer_queue import TransferJob, TransferQueue, TransferState
@@ -32,7 +33,10 @@ class DebSCPWindow(tk.Tk):
         self.remote_entries: dict[str, RemoteEntry] = {}
         self.local_path = Path.home()
         self.remote_path = "/"
-        self.queue = TransferQueue(lambda job: self.after(0, self._transfer_update, job))
+        self.closing = False
+        self._background_threads: set[threading.Thread] = set()
+        self._background_lock = threading.Lock()
+        self.queue = TransferQueue(self._queue_update)
         self.protocol("WM_DELETE_WINDOW", self._close)
         self._build()
         self._load_session_names()
@@ -51,30 +55,50 @@ class DebSCPWindow(tk.Tk):
         self.password = tk.StringVar()
         self.key_file = tk.StringVar()
         fields = (
-            ("Profile", self.session_name, 16), ("Host", self.host, 25),
-            ("Port", self.port, 6), ("User", self.username, 15), ("Password", self.password, 16),
+            ("Profile", self.session_name, 16),
+            ("Host", self.host, 25),
+            ("Port", self.port, 6),
+            ("User", self.username, 15),
+            ("Password", self.password, 16),
         )
         for index, (label, variable, width) in enumerate(fields):
             ttk.Label(connection, text=label).grid(row=0, column=index * 2, padx=(3, 2), sticky="w")
             if label == "Profile":
                 self.profile_box = ttk.Combobox(connection, textvariable=variable, width=width)
                 self.profile_box.bind("<<ComboboxSelected>>", self._profile_selected)
-                widget = self.profile_box
+                self.profile_box.grid(row=0, column=index * 2 + 1, padx=(0, 7), sticky="ew")
             else:
-                widget = ttk.Entry(connection, textvariable=variable, width=width, show="•" if label == "Password" else "")
-            widget.grid(row=0, column=index * 2 + 1, padx=(0, 7), sticky="ew")
+                widget = ttk.Entry(
+                    connection, textvariable=variable, width=width, show="•" if label == "Password" else ""
+                )
+                widget.grid(row=0, column=index * 2 + 1, padx=(0, 7), sticky="ew")
         ttk.Button(connection, text=_("Connect"), command=self._connect).grid(row=0, column=10, padx=3)
         ttk.Button(connection, text=_("Save"), command=self._save_profile).grid(row=0, column=11, padx=3)
         ttk.Label(connection, text="Protocol").grid(row=1, column=0, padx=(3, 2), pady=(6, 0), sticky="w")
-        ttk.Combobox(
-            connection, textvariable=self.protocol_name,
-            values=("sftp", "scp", "ftp", "ftps", "webdav", "webdavs", "s3"), state="readonly", width=13,
-        ).grid(row=1, column=1, padx=(0, 7), pady=(6, 0), sticky="w")
-        ttk.Label(connection, text="Advanced proxy, endpoint, region, and key options are loaded from saved profiles").grid(
-            row=1, column=2, columnspan=8, pady=(6, 0), sticky="w",
+        protocol_box = ttk.Combobox(
+            connection,
+            textvariable=self.protocol_name,
+            values=("sftp", "scp", "ftp", "ftps", "webdav", "webdavs", "s3"),
+            state="readonly",
+            width=13,
         )
-        ttk.Button(connection, text="Save workspace", command=self._save_workspace).grid(row=1, column=10, padx=3, pady=(6, 0))
-        ttk.Button(connection, text="Open workspace", command=self._open_workspace).grid(row=1, column=11, padx=3, pady=(6, 0))
+        protocol_box.grid(row=1, column=1, padx=(0, 7), pady=(6, 0), sticky="w")
+        protocol_box.bind("<<ComboboxSelected>>", self._protocol_selected)
+        ttk.Label(
+            connection, text="Advanced proxy, endpoint, region, and key options are loaded from saved profiles"
+        ).grid(
+            row=1,
+            column=2,
+            columnspan=8,
+            pady=(6, 0),
+            sticky="w",
+        )
+        ttk.Button(connection, text="Save workspace", command=self._save_workspace).grid(
+            row=1, column=10, padx=3, pady=(6, 0)
+        )
+        ttk.Button(connection, text="Open workspace", command=self._open_workspace).grid(
+            row=1, column=11, padx=3, pady=(6, 0)
+        )
         connection.columnconfigure(3, weight=1)
 
         self.tabs = ttk.Notebook(self, height=28)
@@ -115,7 +139,13 @@ class DebSCPWindow(tk.Tk):
         self.status = tk.StringVar(value=_("Ready"))
         ttk.Label(self, textvariable=self.status, anchor="w").pack(fill="x", padx=12, pady=(0, 8))
 
-    def _pane(self, parent: ttk.Frame, title: str, path_var: tk.StringVar, go: object) -> ttk.Treeview:
+    def _pane(
+        self,
+        parent: ttk.Frame,
+        title: str,
+        path_var: tk.StringVar,
+        go: Callable[[], object],
+    ) -> ttk.Treeview:
         bar = ttk.Frame(parent, padding=(3, 3))
         bar.pack(fill="x")
         ttk.Label(bar, text=f"{title}:").pack(side="left")
@@ -152,18 +182,33 @@ class DebSCPWindow(tk.Tk):
             self.key_file.set(selected.key_file or "")
             self.remote_path_var.set(selected.remote_path)
 
+    def _protocol_selected(self, _event: object = None) -> None:
+        self.port.set(str(DEFAULT_PORTS[self.protocol_name.get()]))
+
     def _config(self) -> SessionConfig:
         if not self.host.get().strip():
             raise ValueError("Host or bucket is required")
         if self.protocol_name.get() != "s3" and not self.username.get().strip():
             raise ValueError("User is required for this protocol")
-        return SessionConfig(
-            name=self.session_name.get().strip() or self.host.get().strip(),
-            host=self.host.get().strip(), username=self.username.get().strip(),
-            port=int(self.port.get()), key_file=self.key_file.get().strip() or None,
-            remote_path=self.remote_path_var.get().strip() or "/",
-            protocol=self.protocol_name.get(),
-        )
+        name = self.session_name.get().strip() or self.host.get().strip()
+        protocol = self.protocol_name.get()
+        host, username = self.host.get().strip(), self.username.get().strip()
+        port, key_file = int(self.port.get()), self.key_file.get().strip() or None
+        remote_path, tls = self.remote_path_var.get().strip() or "/", protocol in ("ftps", "webdavs")
+        existing = next((item for item in self.sessions if item.name == name), None)
+        if existing:
+            return replace(
+                existing,
+                name=name,
+                host=host,
+                username=username,
+                port=port,
+                key_file=key_file,
+                remote_path=remote_path,
+                protocol=protocol,
+                tls=tls,
+            )
+        return SessionConfig(name, host, username, port, key_file, remote_path, protocol, tls)
 
     def _save_profile(self) -> None:
         try:
@@ -181,6 +226,13 @@ class DebSCPWindow(tk.Tk):
             config = self._config()
         except ValueError as exc:
             messagebox.showerror("Invalid connection", str(exc), parent=self)
+            return
+        if config.protocol == "ftp" and not messagebox.askyesno(
+            "Unencrypted FTP",
+            "FTP sends credentials and file data without encryption. Continue anyway?\n\nUse FTPS or SFTP when possible.",
+            icon="warning",
+            parent=self,
+        ):
             return
         self.status.set(f"Connecting to {config.host}…")
         password = self.password.get() or None
@@ -209,7 +261,8 @@ class DebSCPWindow(tk.Tk):
         accepted = messagebox.askyesno(
             "Unknown SSH host key",
             f"{exc}\n\nVerify this fingerprint with the server administrator. Trust and save it?",
-            icon="warning", parent=self,
+            icon="warning",
+            parent=self,
         )
         if not accepted:
             self.status.set("Connection cancelled: host key was not trusted")
@@ -239,14 +292,29 @@ class DebSCPWindow(tk.Tk):
         self.status.set(f"Connected to {self.host.get()} using {self.protocol_name.get().upper()}")
 
     def _background(self, operation: Callable[[], object]) -> None:
+        if self.closing:
+            return
+
         def runner() -> None:
             try:
                 operation()
             except Exception as exc:  # noqa: BLE001 - UI boundary reports backend failures
                 message = str(exc)
-                self.after(0, lambda: messagebox.showerror("DebSCP", message, parent=self))
-                self.after(0, self.status.set, "Operation failed")
-        threading.Thread(target=runner, daemon=True).start()
+                if not self.closing:
+                    self.after(0, lambda: messagebox.showerror("DebSCP", message, parent=self))
+                    self.after(0, self.status.set, "Operation failed")
+            finally:
+                with self._background_lock:
+                    self._background_threads.discard(threading.current_thread())
+
+        worker = threading.Thread(target=runner, daemon=True)
+        with self._background_lock:
+            self._background_threads.add(worker)
+        worker.start()
+
+    def _queue_update(self, job: TransferJob) -> None:
+        if not self.closing:
+            self.after(0, self._transfer_update, job)
 
     def _local_go(self) -> None:
         target = Path(self.local_path_var.get()).expanduser()
@@ -260,14 +328,16 @@ class DebSCPWindow(tk.Tk):
         if not self.backend:
             return
         target = normalize_remote_path(self.remote_path_var.get())
-        self._background(lambda: self._remote_list_worker(target))
+        backend, session = self.backend, self.active_session
+        self._background(lambda: self._remote_list_worker(backend, session, target))
 
-    def _remote_list_worker(self, target: str) -> None:
-        assert self.backend
-        entries = self.backend.listdir(target)
+    def _remote_list_worker(self, backend: RemoteBackend, session: str | None, target: str) -> None:
+        entries = backend.listdir(target)
+        if backend is not self.backend or session != self.active_session:
+            return
         self.remote_path = target
-        if self.active_session:
-            self.connections[self.active_session] = (self.backend, target)
+        if session:
+            self.connections[session] = (backend, target)
         self.after(0, self.remote_path_var.set, target)
         self.after(0, self._show_remote, entries)
 
@@ -288,7 +358,9 @@ class DebSCPWindow(tk.Tk):
                 modified = __import__("datetime").datetime.fromtimestamp(details.st_mtime).strftime("%Y-%m-%d %H:%M")
             except OSError:
                 size, modified = "?", "?"
-            self.local_tree.insert("", "end", iid=item.name, values=(("📁 " if item.is_dir() else "") + item.name, size, modified))
+            self.local_tree.insert(
+                "", "end", iid=item.name, values=(("📁 " if item.is_dir() else "") + item.name, size, modified)
+            )
 
     def _show_remote(self, entries: list[RemoteEntry]) -> None:
         self.remote_tree.delete(*self.remote_tree.get_children())
@@ -296,10 +368,16 @@ class DebSCPWindow(tk.Tk):
         if self.remote_path != "/":
             self.remote_tree.insert("", "end", iid="..", values=("📁 ..", "—", ""))
         for entry in entries:
-            self.remote_tree.insert("", "end", iid=entry.name, values=(
-                ("📁 " if entry.is_dir else "") + entry.name,
-                entry.display_size, entry.modified.strftime("%Y-%m-%d %H:%M"),
-            ))
+            self.remote_tree.insert(
+                "",
+                "end",
+                iid=entry.name,
+                values=(
+                    ("📁 " if entry.is_dir else "") + entry.name,
+                    entry.display_size,
+                    entry.modified.strftime("%Y-%m-%d %H:%M"),
+                ),
+            )
 
     def _local_open(self, _event: object) -> None:
         selected = self.local_tree.selection()
@@ -333,21 +411,27 @@ class DebSCPWindow(tk.Tk):
 
     def _upload(self) -> None:
         source = self._selected_local()
-        if not source or not source.is_file() or not self.backend:
-            messagebox.showinfo("Upload", "Select a local file and connect first.", parent=self)
+        if not source or not source.exists() or not self.backend:
+            messagebox.showinfo("Upload", "Select a local item and connect first.", parent=self)
             return
         destination = str(PurePosixPath(self.remote_path, source.name))
         backend = self.backend
-        self.queue.submit(TransferJob(f"Upload {source.name}", lambda progress: backend.upload(source, destination, progress)))
+        operation = backend.upload_tree if source.is_dir() else backend.upload
+        self.queue.submit(
+            TransferJob(f"Upload {source.name}", lambda progress: operation(source, destination, progress))
+        )
 
     def _download(self) -> None:
         source = self._selected_remote()
-        if not source or source.is_dir or not self.backend:
-            messagebox.showinfo("Download", "Select a remote file and connect first.", parent=self)
+        if not source or not self.backend:
+            messagebox.showinfo("Download", "Select a remote item and connect first.", parent=self)
             return
         destination = self.local_path / source.name
         backend = self.backend
-        self.queue.submit(TransferJob(f"Download {source.name}", lambda progress: backend.download(source.path, destination, progress)))
+        operation = backend.download_tree if source.is_dir else backend.download
+        self.queue.submit(
+            TransferJob(f"Download {source.name}", lambda progress: operation(source.path, destination, progress)),
+        )
 
     def _remote_mkdir(self) -> None:
         if not self.backend:
@@ -355,7 +439,8 @@ class DebSCPWindow(tk.Tk):
         name = simpledialog.askstring("New remote folder", "Folder name:", parent=self)
         if name and "/" not in name and name not in (".", ".."):
             path = str(PurePosixPath(self.remote_path, name))
-            self._background(lambda: (self.backend.mkdir(path), self.after(0, self._refresh_remote)))
+            backend = self.backend
+            self._background(lambda: (backend.mkdir(path), self.after(0, self._refresh_backend, backend)))
 
     def _remote_rename(self) -> None:
         entry = self._selected_remote()
@@ -364,14 +449,30 @@ class DebSCPWindow(tk.Tk):
         name = simpledialog.askstring("Rename remote item", "New name:", initialvalue=entry.name, parent=self)
         if name and "/" not in name and name not in (".", ".."):
             destination = str(PurePosixPath(self.remote_path, name))
-            self._background(lambda: (self.backend.rename(entry.path, destination), self.after(0, self._refresh_remote)))
+            backend = self.backend
+            self._background(
+                lambda: (backend.rename(entry.path, destination), self.after(0, self._refresh_backend, backend))
+            )
 
     def _remote_delete(self) -> None:
         entry = self._selected_remote()
         if not entry or not self.backend:
             return
         if messagebox.askyesno("Delete remote item", f"Permanently delete {entry.name}?", icon="warning", parent=self):
-            self._background(lambda: (self.backend.remove(entry.path, directory=entry.is_dir), self.after(0, self._refresh_remote)))
+            backend = self.backend
+
+            def remove() -> None:
+                if entry.is_dir:
+                    backend.remove_tree(entry.path)
+                else:
+                    backend.remove(entry.path)
+                self.after(0, self._refresh_backend, backend)
+
+            self._background(remove)
+
+    def _refresh_backend(self, backend: RemoteBackend) -> None:
+        if backend is self.backend:
+            self._refresh_remote()
 
     def _refresh_remote(self) -> None:
         if self.backend:
@@ -399,6 +500,13 @@ class DebSCPWindow(tk.Tk):
         self._remote_go()
 
     def _close_tab(self) -> None:
+        with self._background_lock:
+            background_active = bool(self._background_threads)
+        if self.queue.active or background_active:
+            messagebox.showinfo(
+                "Connection busy", "Wait for active transfers and remote operations before closing a tab.", parent=self
+            )
+            return
         selected = self.tabs.select()
         name = self.tab_names.pop(selected, None)
         if not name:
@@ -435,7 +543,22 @@ class DebSCPWindow(tk.Tk):
         for session_name in workspaces[name]:
             config = saved.get(session_name)
             if config and session_name not in self.connections:
-                self._background(lambda selected=config: self._connect_worker(selected, None))
+                password = None
+                if config.protocol != "s3":
+                    password = simpledialog.askstring(
+                        "Workspace credentials",
+                        f"Password for {session_name} (blank for key/agent):",
+                        show="•",
+                        parent=self,
+                    )
+                    if password is None:
+                        continue
+                    password = password or None
+
+                def connect(selected: SessionConfig = config, secret: str | None = password) -> None:
+                    self._connect_worker(selected, secret)
+
+                self._background(connect)
 
     def _remote_edit(self) -> None:
         entry = self._selected_remote()
@@ -443,11 +566,15 @@ class DebSCPWindow(tk.Tk):
             messagebox.showinfo("Remote edit", "Select a remote file first.", parent=self)
             return
         editor = simpledialog.askstring(
-            "Remote edit", "Editor command (must wait until the editor closes):", initialvalue=os.environ.get("VISUAL", "gedit"), parent=self,
+            "Remote edit",
+            "Editor command (must wait until the editor closes):",
+            initialvalue=os.environ.get("VISUAL") or os.environ.get("EDITOR") or "gedit --standalone",
+            parent=self,
         )
         if not editor:
             return
         backend = self.backend
+
         def edit() -> None:
             try:
                 changed = RemoteEditor(backend).edit(entry.path, editor)
@@ -457,6 +584,7 @@ class DebSCPWindow(tk.Tk):
                 return
             self.after(0, self.status.set, "Uploaded edited file" if changed else "Remote file was unchanged")
             self.after(0, self._refresh_remote)
+
         self._background(edit)
 
     def _sync(self) -> None:
@@ -465,12 +593,15 @@ class DebSCPWindow(tk.Tk):
         remote = simpledialog.askstring("Synchronize", "Remote directory:", initialvalue=self.remote_path, parent=self)
         if not remote:
             return
-        direction = simpledialog.askstring("Synchronize", "Direction: upload, download, or both", initialvalue="both", parent=self)
+        direction = simpledialog.askstring(
+            "Synchronize", "Direction: upload, download, or both", initialvalue="both", parent=self
+        )
         if direction not in {item.value for item in SyncDirection}:
             messagebox.showerror("Synchronize", "Direction must be upload, download, or both.", parent=self)
             return
         backend = self.backend
         local = self.local_path
+
         def compare() -> None:
             engine = SyncEngine(backend)
             actions = engine.compare(local, remote, SyncDirection(direction))
@@ -478,6 +609,7 @@ class DebSCPWindow(tk.Tk):
             if len(actions) > 50:
                 summary += f"\n…and {len(actions) - 50} more"
             self.after(0, self._confirm_sync, engine, actions, local, remote, summary)
+
         self._background(compare)
 
     def _confirm_sync(self, engine: SyncEngine, actions: list, local: Path, remote: str, summary: str) -> None:
@@ -485,7 +617,12 @@ class DebSCPWindow(tk.Tk):
             messagebox.showinfo("Synchronize", "Directories are already synchronized.", parent=self)
             return
         if messagebox.askyesno("Synchronize checklist", f"{summary}\n\nApply these operations?", parent=self):
-            self._background(lambda: (engine.apply(actions, local, remote), self.after(0, self._refresh_all)))
+
+            def apply_sync() -> None:
+                engine.apply(actions, local, remote)
+                self.after(0, self._refresh_all)
+
+            self._background(apply_sync)
 
     def _transfer_update(self, job: TransferJob) -> None:
         progress = f"{job.transferred}/{job.total} bytes" if job.total else job.label
@@ -501,7 +638,26 @@ class DebSCPWindow(tk.Tk):
             messagebox.showerror("Transfer failed", f"{job.label}: {job.error}", parent=self)
 
     def _close(self) -> None:
-        self.queue.shutdown()
+        if self.closing:
+            return
+        self.closing = True
+        self.status.set("Waiting for active transfers to finish…")
+        self.update_idletasks()
+
+        def wait_for_workers() -> None:
+            self.queue.shutdown()
+            while True:
+                with self._background_lock:
+                    background_threads = list(self._background_threads)
+                if not background_threads:
+                    break
+                for worker in background_threads:
+                    worker.join()
+            self.after(0, self._finish_close)
+
+        threading.Thread(target=wait_for_workers, name="debscp-shutdown", daemon=True).start()
+
+    def _finish_close(self) -> None:
         for backend, _path in list(self.connections.values()):
             backend.close()
         self.connections.clear()

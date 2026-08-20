@@ -23,6 +23,7 @@ class SyncOperation(str, Enum):
     MKDIR_REMOTE = "mkdir-remote"
     DELETE_LOCAL = "delete-local"
     DELETE_REMOTE = "delete-remote"
+    CONFLICT = "conflict"
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,12 +39,14 @@ class SyncEngine:
 
     def _remote_tree(self, root: str) -> dict[str, RemoteEntry]:
         result: dict[str, RemoteEntry] = {}
+
         def visit(path: str, relative: str = "") -> None:
             for entry in self.backend.listdir(path):
                 child = f"{relative}/{entry.name}".lstrip("/")
                 result[child] = entry
                 if entry.is_dir:
                     visit(entry.path, child)
+
         visit(normalize_remote_path(root))
         return result
 
@@ -78,17 +81,40 @@ class SyncEngine:
                     actions.append(SyncAction(operation, relative, "missing locally"))
                 elif delete and direction == SyncDirection.UPLOAD:
                     actions.append(SyncAction(SyncOperation.DELETE_REMOTE, relative, "not present locally"))
+            elif local_item and remote_item and local_item.is_dir() != remote_item.is_dir:
+                actions.append(SyncAction(SyncOperation.CONFLICT, relative, "file/directory type mismatch"))
             elif local_item and remote_item and not local_item.is_dir() and not remote_item.is_dir:
                 local_mtime = local_item.stat().st_mtime
-                different = local_item.stat().st_size != remote_item.size or abs(local_mtime - remote_item.modified.timestamp()) > 2
+                different = (
+                    local_item.stat().st_size != remote_item.size
+                    or abs(local_mtime - remote_item.modified.timestamp()) > 2
+                )
                 if different:
-                    if direction == SyncDirection.UPLOAD or (direction == SyncDirection.BOTH and local_mtime >= remote_item.modified.timestamp()):
+                    if direction == SyncDirection.UPLOAD or (
+                        direction == SyncDirection.BOTH and local_mtime >= remote_item.modified.timestamp()
+                    ):
                         actions.append(SyncAction(SyncOperation.UPLOAD, relative, "local file is newer or different"))
                     else:
-                        actions.append(SyncAction(SyncOperation.DOWNLOAD, relative, "remote file is newer or different"))
-        return actions
+                        actions.append(
+                            SyncAction(SyncOperation.DOWNLOAD, relative, "remote file is newer or different")
+                        )
+
+        def order(action: SyncAction) -> tuple[int, int, str]:
+            depth = len(PurePosixPath(action.relative_path).parts)
+            if action.operation in (SyncOperation.MKDIR_LOCAL, SyncOperation.MKDIR_REMOTE):
+                return (0, depth, action.relative_path)
+            if action.operation in (SyncOperation.DELETE_LOCAL, SyncOperation.DELETE_REMOTE):
+                return (3, -depth, action.relative_path)
+            if action.operation == SyncOperation.CONFLICT:
+                return (2, depth, action.relative_path)
+            return (1, depth, action.relative_path)
+
+        return sorted(actions, key=order)
 
     def apply(self, actions: list[SyncAction], local_root: Path, remote_root: str) -> None:
+        conflicts = [action.relative_path for action in actions if action.operation == SyncOperation.CONFLICT]
+        if conflicts:
+            raise ValueError(f"Resolve file/directory conflicts before synchronizing: {', '.join(conflicts)}")
         remote_base = PurePosixPath(normalize_remote_path(remote_root))
         for action in actions:
             local_path = local_root / action.relative_path
@@ -104,7 +130,14 @@ class SyncEngine:
             elif action.operation == SyncOperation.DELETE_LOCAL:
                 local_path.rmdir() if local_path.is_dir() else local_path.unlink()
             elif action.operation == SyncOperation.DELETE_REMOTE:
-                entry = next((item for item in self.backend.listdir(str(PurePosixPath(remote_path).parent)) if item.path == remote_path), None)
+                entry = next(
+                    (
+                        item
+                        for item in self.backend.listdir(str(PurePosixPath(remote_path).parent))
+                        if item.path == remote_path
+                    ),
+                    None,
+                )
                 self.backend.remove(remote_path, directory=bool(entry and entry.is_dir))
 
     def keep_up_to_date(
@@ -116,9 +149,24 @@ class SyncEngine:
         stop_after: int | None = None,
     ) -> None:
         iterations = 0
+        uploaded: dict[str, tuple[int, int]] = {}
         while stop_after is None or iterations < stop_after:
             actions = self.compare(local_root, remote_root, SyncDirection.UPLOAD, preset)
+            actions = [
+                action
+                for action in actions
+                if action.operation != SyncOperation.UPLOAD
+                or uploaded.get(action.relative_path) != self._local_signature(local_root / action.relative_path)
+            ]
             self.apply(actions, local_root, remote_root)
+            for action in actions:
+                if action.operation == SyncOperation.UPLOAD:
+                    uploaded[action.relative_path] = self._local_signature(local_root / action.relative_path)
             iterations += 1
-            time.sleep(interval)
+            if stop_after is None or iterations < stop_after:
+                time.sleep(interval)
 
+    @staticmethod
+    def _local_signature(path: Path) -> tuple[int, int]:
+        details = path.stat()
+        return details.st_size, details.st_mtime_ns

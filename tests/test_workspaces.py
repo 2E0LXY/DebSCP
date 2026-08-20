@@ -7,4 +7,3 @@ def test_workspace_store(tmp_path) -> None:
     assert store.load() == {"production": ["web", "db"]}
     store.delete("production")
     assert store.load() == {}
-

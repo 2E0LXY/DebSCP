@@ -5,7 +5,7 @@ workflow of WinSCP. It provides a dual-pane file manager, SFTP, SCP, FTP/FTPS,
 WebDAV and S3 backends, synchronization, remote editing, saved workspaces,
 automation, and Debian packaging without Wine or Windows libraries.
 
-> **Project status:** v0.2.0 implements every capability category in the port
+> **Project status:** v0.3.0 implements every capability category in the port
 > matrix. It is still an independent implementation, so protocol edge cases
 > and UI details can differ from WinSCP. See the [compatibility matrix](docs/PORT_STATUS.md).
 > DebSCP is an independent project and is not affiliated with or endorsed by
@@ -18,11 +18,11 @@ automation, and Debian packaging without Wine or Windows libraries.
 - FTP, certificate-validated FTPS, WebDAV/HTTPS, Amazon S3 and S3-compatible storage
 - Strict host-key checking with an explicit first-connection fingerprint prompt
 - Upload/download queue with recursive operations, progress and errors
-- Browse, create, rename, and delete remote files and empty directories
+- Browse, create, rename, and recursively delete remote files and directories
 - Saved profiles that deliberately never store passwords
 - Bidirectional synchronization, reviewable checklists, and keep-up-to-date mode
 - Conflict-checked remote editing and named include/exclude transfer presets
-- Resumable transfers and temporary-name atomic finalization where supported
+- Identity-validated resumable downloads and temporary-name atomic uploads where supported
 - OpenSSH config, ProxyCommand and jump-host support
 - Live connection tabs and saved workspaces
 - Scriptable batch/JSON CLI and stable Python automation API
@@ -35,7 +35,7 @@ automation, and Debian packaging without Wine or Windows libraries.
 Download the `.deb` from the repository's Releases page and run:
 
 ```sh
-sudo apt install ./debscp_0.2.0_all.deb
+sudo apt install ./debscp_0.3.0_all.deb
 ```
 
 Launch **DebSCP** from the application menu, run `debscp-gui`, or use the CLI:
@@ -66,6 +66,7 @@ On Debian or Ubuntu:
 sudo apt install build-essential devscripts debhelper dh-python \
   pybuild-plugin-pyproject python3-all python3-setuptools python3-boto3 \
   python3-paramiko python3-requests python3-scp python3-tk python3-pytest ruff
+sudo apt install python3-defusedxml
 python3 -m pytest
 ruff check src tests
 ./packaging/build-deb.sh
@@ -92,6 +93,9 @@ debscp-gui
 - Unknown keys are rejected until the user explicitly reviews and accepts the
   displayed key type and fingerprint.
 - Remote paths are normalized and deleting `/` is blocked.
+- WebDAV XML is parsed without entity expansion and oversized listings are rejected.
+- Plain FTP is available for legacy servers but is unencrypted; prefer FTPS or SFTP.
+- Resumed downloads are accepted only when server metadata still identifies the same source object.
 
 This is early software. Review changes carefully before using it against
 important systems and keep independent backups.

@@ -10,6 +10,7 @@ from pathlib import Path, PurePosixPath
 import paramiko
 
 from ..models import RemoteEntry, SessionConfig, normalize_remote_path
+from ..resume import finish_partial, prepare_partial
 from .base import BackendCapabilities, ProgressCallback, RemoteBackend
 
 
@@ -27,7 +28,14 @@ class RejectUnknownHostKeys(paramiko.MissingHostKeyPolicy):
 
 
 class SFTPBackend(RemoteBackend):
-    capabilities = BackendCapabilities(resume=True, atomic_upload=True, recursive=True, permissions=True, symlinks=True)
+    allow_missing_sftp = False
+    capabilities = BackendCapabilities(
+        download_resume=True,
+        atomic_upload=True,
+        recursive=True,
+        permissions=True,
+        symlinks=True,
+    )
 
     def __init__(self, config: SessionConfig, password: str | None = None) -> None:
         self.config = config
@@ -84,7 +92,13 @@ class SFTPBackend(RemoteBackend):
             client.close()
             raise
         self.client = client
-        self.sftp = client.open_sftp()
+        try:
+            self.sftp = client.open_sftp()
+        except (OSError, paramiko.SSHException):
+            if not self.allow_missing_sftp:
+                client.close()
+                self.client = None
+                raise
 
     def trust_host_key(self, hostname: str, key: paramiko.PKey) -> None:
         self.known_hosts.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -96,12 +110,14 @@ class SFTPBackend(RemoteBackend):
         os.chmod(self.known_hosts, 0o600)
 
     def close(self) -> None:
-        if self.sftp:
-            self.sftp.close()
-        if self.client:
-            self.client.close()
-        self.sftp = None
-        self.client = None
+        try:
+            if self.sftp:
+                self.sftp.close()
+        finally:
+            if self.client:
+                self.client.close()
+            self.sftp = None
+            self.client = None
 
     def _connection(self) -> paramiko.SFTPClient:
         if not self.sftp:
@@ -130,11 +146,13 @@ class SFTPBackend(RemoteBackend):
         local.parent.mkdir(parents=True, exist_ok=True)
         remote_path = normalize_remote_path(remote)
         temporary = local.with_name(local.name + ".debscp-part")
-        total = int(self._connection().stat(remote_path).st_size or 0)
-        offset = temporary.stat().st_size if temporary.exists() else 0
-        if offset > total:
-            temporary.unlink()
-            offset = 0
+        details = self._connection().stat(remote_path)
+        total = int(details.st_size or 0)
+        identity = {"protocol": "sftp", "path": remote_path, "size": total, "mtime": int(details.st_mtime or 0)}
+        offset = prepare_partial(temporary, identity, total)
+        if offset == total:
+            finish_partial(temporary, local)
+            return
         with self._connection().open(remote_path, "rb") as source, temporary.open("ab") as destination:
             source.seek(offset)
             transferred = offset
@@ -143,22 +161,18 @@ class SFTPBackend(RemoteBackend):
                 transferred += len(chunk)
                 if progress:
                     progress(transferred, total)
-        temporary.replace(local)
+        finish_partial(temporary, local)
 
     def upload(self, local: Path, remote: str, progress: ProgressCallback | None = None) -> None:
         remote_path = normalize_remote_path(remote)
         temporary = remote_path + ".debscp-part"
         total = local.stat().st_size
         try:
-            offset = int(self._connection().stat(temporary).st_size or 0)
-        except OSError:
-            offset = 0
-        if offset > total:
             self._connection().remove(temporary)
-            offset = 0
-        with local.open("rb") as source, self._connection().open(temporary, "ab") as destination:
-            source.seek(offset)
-            transferred = offset
+        except OSError:
+            pass
+        with local.open("rb") as source, self._connection().open(temporary, "wb") as destination:
+            transferred = 0
             while chunk := source.read(262144):
                 destination.write(chunk)
                 transferred += len(chunk)
@@ -174,7 +188,13 @@ class SFTPBackend(RemoteBackend):
             self._connection().rename(temporary, remote_path)
 
     def mkdir(self, path: str) -> None:
-        self._connection().mkdir(normalize_remote_path(path))
+        normalized = normalize_remote_path(path)
+        try:
+            self._connection().mkdir(normalized)
+        except OSError:
+            mode = int(self._connection().stat(normalized).st_mode or 0)
+            if not stat.S_ISDIR(mode):
+                raise
 
     def remove(self, path: str, *, directory: bool = False) -> None:
         normalized = normalize_remote_path(path)

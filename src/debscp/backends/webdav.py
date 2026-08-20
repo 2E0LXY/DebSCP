@@ -4,17 +4,19 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from pathlib import Path, PurePosixPath
 from urllib.parse import quote, unquote, urljoin, urlparse
-from xml.etree import ElementTree
 
 import requests
+from defusedxml import ElementTree
 
 from ..models import RemoteEntry, SessionConfig, normalize_remote_path
+from ..resume import finish_partial, prepare_partial
 from .base import BackendCapabilities, ProgressCallback, RemoteBackend
 
 
 class WebDAVBackend(RemoteBackend):
-    capabilities = BackendCapabilities(resume=True, atomic_upload=True, recursive=True)
+    capabilities = BackendCapabilities(download_resume=True, atomic_upload=True, recursive=True)
     _DAV = "DAV:"
+    _MAX_XML_BYTES = 10 * 1024 * 1024
 
     def __init__(self, config: SessionConfig, password: str | None = None) -> None:
         self.config = config
@@ -36,9 +38,17 @@ class WebDAVBackend(RemoteBackend):
 
     def listdir(self, path: str) -> list[RemoteEntry]:
         base = normalize_remote_path(path)
-        response = self.session.request("PROPFIND", self._url(base), headers={"Depth": "1"}, timeout=30)
+        response = self.session.request("PROPFIND", self._url(base), headers={"Depth": "1"}, timeout=30, stream=True)
         response.raise_for_status()
-        root = ElementTree.fromstring(response.content)
+        payload = bytearray()
+        try:
+            for chunk in response.iter_content(65536):
+                payload.extend(chunk)
+                if len(payload) > self._MAX_XML_BYTES:
+                    raise ValueError("WebDAV directory response exceeds the 10 MiB safety limit")
+        finally:
+            response.close()
+        root = ElementTree.fromstring(bytes(payload))
         entries: list[RemoteEntry] = []
         base_path = urlparse(self._url(base)).path.rstrip("/")
         for item in root.findall(f"{{{self._DAV}}}response"):
@@ -53,19 +63,38 @@ class WebDAVBackend(RemoteBackend):
             resource_type = prop.find(f"{{{self._DAV}}}resourcetype")
             is_dir = resource_type is not None and resource_type.find(f"{{{self._DAV}}}collection") is not None
             modified_text = prop.findtext(f"{{{self._DAV}}}getlastmodified")
-            modified = parsedate_to_datetime(modified_text).astimezone() if modified_text else datetime.fromtimestamp(0, UTC)
-            entries.append(RemoteEntry(
-                name=name, path=str(PurePosixPath(base, name)),
-                size=int(prop.findtext(f"{{{self._DAV}}}getcontentlength", "0") or 0),
-                modified=modified, mode=0, is_dir=is_dir,
-            ))
+            modified = (
+                parsedate_to_datetime(modified_text).astimezone() if modified_text else datetime.fromtimestamp(0, UTC)
+            )
+            entries.append(
+                RemoteEntry(
+                    name=name,
+                    path=str(PurePosixPath(base, name)),
+                    size=int(prop.findtext(f"{{{self._DAV}}}getcontentlength", "0") or 0),
+                    modified=modified,
+                    mode=0,
+                    is_dir=is_dir,
+                )
+            )
         return sorted(entries, key=lambda entry: (not entry.is_dir, entry.name.casefold()))
 
     def download(self, remote: str, local: Path, progress: ProgressCallback | None = None) -> None:
         local.parent.mkdir(parents=True, exist_ok=True)
         temporary = local.with_name(local.name + ".debscp-part")
-        offset = temporary.stat().st_size if temporary.exists() else 0
-        headers = {"Range": f"bytes={offset}-"} if offset else {}
+        head = self.session.head(self._url(remote), timeout=30)
+        head.raise_for_status()
+        total = int(head.headers.get("Content-Length", 0))
+        validator = head.headers.get("ETag") or head.headers.get("Last-Modified")
+        identity = (
+            {"protocol": "webdav", "url": self._url(remote), "size": total, "validator": validator}
+            if validator
+            else None
+        )
+        offset = prepare_partial(temporary, identity, total)
+        if offset == total:
+            finish_partial(temporary, local)
+            return
+        headers = {"Range": f"bytes={offset}-", "If-Range": validator} if offset and validator else {}
         response = self.session.get(self._url(remote), headers=headers, stream=True, timeout=60)
         if offset and response.status_code != 206:
             temporary.unlink(missing_ok=True)
@@ -81,12 +110,13 @@ class WebDAVBackend(RemoteBackend):
                 transferred += len(chunk)
                 if progress:
                     progress(transferred, total)
-        temporary.replace(local)
+        finish_partial(temporary, local)
 
     def upload(self, local: Path, remote: str, progress: ProgressCallback | None = None) -> None:
         remote_path = normalize_remote_path(remote)
         temporary = remote_path + ".debscp-part"
         total, transferred = local.stat().st_size, 0
+
         def stream():
             nonlocal transferred
             with local.open("rb") as source:
@@ -95,7 +125,13 @@ class WebDAVBackend(RemoteBackend):
                     if progress:
                         progress(transferred, total)
                     yield chunk
-        response = self.session.put(self._url(temporary), data=stream(), timeout=120)
+
+        response = self.session.put(
+            self._url(temporary),
+            data=stream(),
+            headers={"Content-Length": str(total)},
+            timeout=120,
+        )
         response.raise_for_status()
         self._move(temporary, remote_path, overwrite=True)
 
@@ -116,4 +152,3 @@ class WebDAVBackend(RemoteBackend):
 
     def rename(self, source: str, destination: str) -> None:
         self._move(source, destination, overwrite=False)
-

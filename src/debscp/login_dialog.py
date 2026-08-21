@@ -26,9 +26,11 @@ class LoginDialog(tk.Toplevel):
         on_import: Callable[[], None],
     ) -> None:
         super().__init__(parent)
-        self.title("DebSCP Login")
-        self.geometry("820x500+520+260")
-        self.minsize(720, 440)
+        self.title("Connect to a site — DebSCP")
+        self.geometry("820x520")
+        self.minsize(720, 470)
+        colors = getattr(parent, "colors", {"surface": "#202326"})
+        self.configure(background=colors["surface"])
         self.attributes("-topmost", True)
         self.store = store
         self.credentials = credentials
@@ -68,15 +70,16 @@ class LoginDialog(tk.Toplevel):
         outer = ttk.Frame(self, padding=12)
         outer.pack(fill="both", expand=True)
         outer.columnconfigure(0, weight=2)
-        outer.columnconfigure(1, weight=3)
+        outer.columnconfigure(1, weight=4)
         outer.rowconfigure(1, weight=1)
 
-        ttk.Label(outer, text="Saved accounts", font=("TkDefaultFont", 11, "bold")).grid(
-            row=0, column=0, sticky="w", pady=(0, 7)
-        )
-        search = ttk.Entry(outer, textvariable=self.search)
-        search.grid(row=0, column=0, sticky="e", padx=(110, 12), pady=(0, 7))
-        search.insert(0, "")
+        saved_header = ttk.Frame(outer)
+        saved_header.grid(row=0, column=0, sticky="ew", padx=(0, 12), pady=(0, 7))
+        saved_header.columnconfigure(1, weight=1)
+        ttk.Label(saved_header, text="SAVED ACCOUNTS", style="Section.TLabel").grid(row=0, column=0, sticky="w")
+        ttk.Label(saved_header, text="Search", style="Muted.TLabel").grid(row=0, column=1, sticky="e", padx=(8, 5))
+        ttk.Entry(saved_header, textvariable=self.search, width=15).grid(row=0, column=2, sticky="e")
+        ttk.Label(outer, text="SESSION", style="Section.TLabel").grid(row=0, column=1, sticky="w", pady=(0, 7))
 
         tree_frame = ttk.Frame(outer)
         tree_frame.grid(row=1, column=0, sticky="nsew", padx=(0, 12))
@@ -88,38 +91,57 @@ class LoginDialog(tk.Toplevel):
         self.tree.bind("<<TreeviewSelect>>", self._tree_selected)
         self.tree.bind("<Double-1>", lambda _event: self._login())
 
-        details = ttk.LabelFrame(outer, text="Account", padding=12)
-        details.grid(row=0, column=1, rowspan=2, sticky="nsew")
-        details.columnconfigure(1, weight=1)
-        fields: tuple[tuple[str, tk.StringVar], ...] = (
-            ("Account name", self.name),
-            ("Folder", self.folder),
-            ("Host name", self.host),
-            ("Port number", self.port),
-            ("User name", self.username),
-            ("Password", self.password),
-            ("Remote folder", self.remote_path),
-            ("Private key", self.key_file),
-        )
-        for row, (label, variable) in enumerate(fields, start=1):
-            ttk.Label(details, text=label).grid(row=row, column=0, sticky="w", padx=(0, 10), pady=5)
-            entry = ttk.Entry(details, textvariable=variable, show="•" if label == "Password" else "")
-            entry.grid(row=row, column=1, sticky="ew", pady=5)
-            if label == "Private key":
-                ttk.Button(details, text="Browse…", command=self._choose_key).grid(row=row, column=2, padx=(6, 0))
-        ttk.Label(details, text="File protocol").grid(row=0, column=0, sticky="w", padx=(0, 10), pady=5)
+        details = ttk.Frame(outer, style="Card.TFrame", padding=14)
+        details.grid(row=1, column=1, sticky="nsew")
+        details.columnconfigure(0, weight=3)
+        details.columnconfigure(1, weight=2)
+        ttk.Label(details, text="File protocol", style="Card.TLabel").grid(row=0, column=0, columnspan=2, sticky="w")
         protocol = ttk.Combobox(
             details,
             textvariable=self.protocol_name,
             values=tuple(DEFAULT_PORTS),
             state="readonly",
         )
-        protocol.grid(row=0, column=1, sticky="ew", pady=5)
+        protocol.grid(row=1, column=0, columnspan=2, sticky="ew", pady=(3, 11))
         protocol.bind("<<ComboboxSelected>>", self._protocol_selected)
+
+        def field(
+            label: str,
+            variable: tk.StringVar,
+            row: int,
+            column: int,
+            *,
+            show: str = "",
+            browse: bool = False,
+        ) -> None:
+            wrapper = ttk.Frame(details, style="Card.TFrame")
+            wrapper.grid(
+                row=row,
+                column=column,
+                sticky="ew",
+                padx=(0, 8) if column == 0 else (8, 0),
+                pady=(0, 10),
+            )
+            wrapper.columnconfigure(0, weight=1)
+            ttk.Label(wrapper, text=label, style="Card.TLabel").grid(row=0, column=0, sticky="w")
+            ttk.Entry(wrapper, textvariable=variable, show=show).grid(row=1, column=0, sticky="ew", pady=(3, 0))
+            if browse:
+                ttk.Button(wrapper, text="Browse…", command=self._choose_key).grid(
+                    row=1, column=1, padx=(5, 0), pady=(3, 0)
+                )
+
+        field("Account name", self.name, 2, 0)
+        field("Folder", self.folder, 2, 1)
+        field("Host name", self.host, 3, 0)
+        field("Port number", self.port, 3, 1)
+        field("User name", self.username, 4, 0)
+        field("Password", self.password, 4, 1, show="•")
+        field("Remote folder", self.remote_path, 5, 0)
+        field("Private key", self.key_file, 5, 1, browse=True)
         ttk.Checkbutton(details, text="Remember password securely", variable=self.save_password).grid(
-            row=9, column=1, sticky="w", pady=(3, 5)
+            row=6, column=0, sticky="w", pady=(3, 5)
         )
-        ttk.Button(details, text="Advanced…", command=self._advanced).grid(row=10, column=1, sticky="e", pady=(4, 0))
+        ttk.Button(details, text="Advanced…", command=self._advanced).grid(row=6, column=1, sticky="e", pady=(4, 0))
 
         ttk.Label(outer, textvariable=self.status, anchor="w").grid(
             row=2, column=0, columnspan=2, sticky="ew", pady=(10, 7)
@@ -150,7 +172,7 @@ class LoginDialog(tk.Toplevel):
     def _populate_tree(self, select_name: str | None = None) -> None:
         query = self.search.get().strip().casefold()
         self.tree.delete(*self.tree.get_children())
-        new_id = self.tree.insert("", "end", iid="new", text="＋ New site", open=True)
+        new_id = self.tree.insert("", "end", iid="new", text="New site", open=True)
         folders: dict[str, str] = {}
         for session in sorted(self.sessions.values(), key=lambda item: (item.folder.casefold(), item.name.casefold())):
             haystack = f"{session.name} {session.host} {session.username} {session.folder}".casefold()
@@ -159,12 +181,12 @@ class LoginDialog(tk.Toplevel):
             folder = session.folder.strip() or "Sites"
             parent = folders.get(folder)
             if parent is None:
-                parent = self.tree.insert("", "end", text=f"▾ {folder}", open=True, tags=("folder",))
+                parent = self.tree.insert("", "end", text=folder, open=True, tags=("folder",))
                 folders[folder] = parent
             self.tree.insert(parent, "end", iid=f"session:{session.name}", text=session.name)
         workspaces = WorkspaceStore().load()
         if workspaces and not query:
-            root = self.tree.insert("", "end", text="▾ Workspaces", open=True, tags=("folder",))
+            root = self.tree.insert("", "end", text="Workspaces", open=True, tags=("folder",))
             for name, members in sorted(workspaces.items()):
                 self.tree.insert(root, "end", iid=f"workspace:{name}", text=f"{name}  ({len(members)} accounts)")
         target = f"session:{select_name}" if select_name in self.sessions else new_id

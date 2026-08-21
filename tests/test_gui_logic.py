@@ -1,6 +1,6 @@
 from datetime import UTC, datetime
 
-from debscp.gui import DebSCPWindow
+from debscp.gui import DebSCPWindow, display_size, local_type
 from debscp.models import RemoteEntry, SessionConfig
 
 
@@ -72,3 +72,13 @@ def test_queued_remote_delete_captures_originating_backend(monkeypatch) -> None:
     pending[0]()
     assert first.removed == [("/victim", False)]
     assert second.removed == []
+
+
+def test_file_pane_display_helpers(tmp_path) -> None:
+    folder = tmp_path / "Projects"
+    folder.mkdir()
+    document = tmp_path / "release.tar.gz"
+    document.write_bytes(b"x" * 1536)
+    assert local_type(folder) == "File folder"
+    assert local_type(document) == "GZ file"
+    assert display_size(document.stat().st_size) == "1.5 KiB"

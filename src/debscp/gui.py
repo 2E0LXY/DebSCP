@@ -5,6 +5,7 @@ import threading
 import tkinter as tk
 from collections.abc import Callable
 from dataclasses import replace
+from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
 from tkinter import filedialog, messagebox, simpledialog, ttk
 
@@ -29,12 +30,42 @@ from .winscp_ini import load_winscp_ini
 from .workspaces import WorkspaceStore
 
 
+def display_size(size: int) -> str:
+    value = float(size)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if value < 1024 or unit == "TiB":
+            return f"{int(value)} B" if unit == "B" else f"{value:.1f} {unit}"
+        value /= 1024
+    return f"{value:.1f} TiB"
+
+
+def local_type(path: Path) -> str:
+    if path.is_dir():
+        return "File folder"
+    suffix = path.suffix.removeprefix(".").upper()
+    return f"{suffix} file" if suffix else "File"
+
+
 class DebSCPWindow(tk.Tk):
     def __init__(self) -> None:
         super().__init__()
         self.title("DebSCP")
-        self.geometry("1120x720")
-        self.minsize(820, 520)
+        self.geometry("1180x760")
+        self.minsize(900, 580)
+        self.ui_font = "Segoe UI" if os.name == "nt" else "DejaVu Sans"
+        self.colors = {
+            "window": "#17191b",
+            "surface": "#202326",
+            "panel": "#181a1c",
+            "panel_alt": "#25282b",
+            "border": "#3a3e42",
+            "text": "#f2f4f5",
+            "muted": "#a8afb5",
+            "accent": "#157fd1",
+            "accent_hover": "#2997e8",
+            "warning": "#f0a229",
+        }
+        self.configure(background=self.colors["window"])
         self.store = SessionStore()
         self.credential_store = CredentialStore()
         self.sessions = self.store.load()
@@ -64,11 +95,7 @@ class DebSCPWindow(tk.Tk):
         self.after_idle(self._show_login_dialog)
 
     def _build(self) -> None:
-        style = ttk.Style(self)
-        style.configure("Treeview", rowheight=25)
-        style.configure("Update.TButton", foreground="#b53a00")
-        connection = ttk.LabelFrame(self, text=_("Connection"), padding=8)
-        connection.pack(fill="x", padx=10, pady=(10, 6))
+        self._configure_theme()
         self.session_name = tk.StringVar()
         self.protocol_name = tk.StringVar(value="sftp")
         self.host = tk.StringVar()
@@ -76,102 +103,200 @@ class DebSCPWindow(tk.Tk):
         self.username = tk.StringVar(value=os.environ.get("USER", ""))
         self.password = tk.StringVar()
         self.key_file = tk.StringVar()
-        fields = (
-            ("Profile", self.session_name, 16),
-            ("Host", self.host, 25),
-            ("Port", self.port, 6),
-            ("User", self.username, 15),
-            ("Password", self.password, 16),
-        )
-        for index, (label, variable, width) in enumerate(fields):
-            ttk.Label(connection, text=label).grid(row=0, column=index * 2, padx=(3, 2), sticky="w")
-            if label == "Profile":
-                self.profile_box = ttk.Combobox(connection, textvariable=variable, width=width)
-                self.profile_box.bind("<<ComboboxSelected>>", self._profile_selected)
-                self.profile_box.grid(row=0, column=index * 2 + 1, padx=(0, 7), sticky="ew")
-            else:
-                widget = ttk.Entry(
-                    connection, textvariable=variable, width=width, show="•" if label == "Password" else ""
-                )
-                widget.grid(row=0, column=index * 2 + 1, padx=(0, 7), sticky="ew")
-        ttk.Button(connection, text=_("Connect"), command=self._connect).grid(row=0, column=10, padx=3)
-        ttk.Button(connection, text=_("Save"), command=self._save_profile).grid(row=0, column=11, padx=3)
-        ttk.Button(connection, text="Accounts…", command=self._show_login_dialog).grid(row=0, column=12, padx=3)
-        ttk.Label(connection, text="Protocol").grid(row=1, column=0, padx=(3, 2), pady=(6, 0), sticky="w")
-        protocol_box = ttk.Combobox(
-            connection,
-            textvariable=self.protocol_name,
-            values=("sftp", "scp", "ftp", "ftps", "ftps-implicit", "webdav", "webdavs", "s3"),
-            state="readonly",
-            width=13,
-        )
-        protocol_box.grid(row=1, column=1, padx=(0, 7), pady=(6, 0), sticky="w")
-        protocol_box.bind("<<ComboboxSelected>>", self._protocol_selected)
-        ttk.Label(
-            connection, text="Advanced proxy, endpoint, region, and key options are loaded from saved profiles"
-        ).grid(
-            row=1,
-            column=2,
-            columnspan=7,
-            pady=(6, 0),
-            sticky="w",
-        )
-        ttk.Button(connection, text="Import WinSCP INI", command=self._import_winscp_ini).grid(
-            row=1, column=9, padx=3, pady=(6, 0)
-        )
-        ttk.Button(connection, text="Save workspace", command=self._save_workspace).grid(
-            row=1, column=10, padx=3, pady=(6, 0)
-        )
-        ttk.Button(connection, text="Open workspace", command=self._open_workspace).grid(
-            row=1, column=11, padx=3, pady=(6, 0)
-        )
-        connection.columnconfigure(3, weight=1)
+        self.local_path_var = tk.StringVar(value=str(self.local_path))
+        self.remote_path_var = tk.StringVar(value=self.remote_path)
 
-        self.tabs = ttk.Notebook(self, height=28)
-        self.tabs.pack(fill="x", padx=10, pady=(0, 6))
+        self._build_menu()
+        toolbar = ttk.Frame(self, style="Toolbar.TFrame", padding=(6, 5))
+        toolbar.pack(fill="x")
+        ttk.Button(toolbar, text="New session", style="Toolbar.TButton", command=self._show_login_dialog).pack(
+            side="left", padx=(0, 4)
+        )
+        ttk.Button(toolbar, text="Synchronize", style="Toolbar.TButton", command=self._sync).pack(side="left", padx=4)
+        ttk.Button(toolbar, text="Transfer queue", style="Toolbar.TButton", command=self._toggle_queue).pack(
+            side="left", padx=4
+        )
+        ttk.Separator(toolbar, orient="vertical").pack(side="left", fill="y", padx=7)
+        ttk.Label(toolbar, text="Saved site", style="Toolbar.TLabel").pack(side="left", padx=(0, 5))
+        self.profile_box = ttk.Combobox(toolbar, textvariable=self.session_name, state="readonly", width=23)
+        self.profile_box.bind("<<ComboboxSelected>>", self._profile_selected)
+        self.profile_box.pack(side="left")
+        ttk.Button(toolbar, text="Connect", style="Accent.TButton", command=self._connect).pack(side="left", padx=5)
+        ttk.Label(toolbar, text="Transfer preset", style="Toolbar.TLabel").pack(side="left", padx=(14, 5))
+        self.transfer_preset = ttk.Combobox(toolbar, values=("Default",), state="readonly", width=16)
+        self.transfer_preset.set("Default")
+        self.transfer_preset.pack(side="left")
+        ttk.Button(toolbar, text="Refresh", style="Toolbar.TButton", command=self._refresh_all).pack(side="right")
+
+        self.tabs = ttk.Notebook(self, height=1)
+        self.tabs.pack(fill="x", pady=(1, 0))
+        welcome = ttk.Frame(self.tabs)
+        self.tabs.add(welcome, text="  Local ↔ Remote  ")
         self.tabs.bind("<<NotebookTabChanged>>", self._tab_changed)
 
-        panes = ttk.Panedwindow(self, orient="horizontal")
-        panes.pack(fill="both", expand=True, padx=10)
+        panes = ttk.Panedwindow(self, orient="horizontal", style="Dark.TPanedwindow")
+        panes.pack(fill="both", expand=True, padx=4, pady=(4, 0))
         left, right = ttk.Frame(panes), ttk.Frame(panes)
         panes.add(left, weight=1)
         panes.add(right, weight=1)
-        self.local_path_var = tk.StringVar(value=str(self.local_path))
-        self.remote_path_var = tk.StringVar(value=self.remote_path)
-        self.local_tree = self._pane(left, "Local", self.local_path_var, self._local_go)
-        self.remote_tree = self._pane(right, "Remote", self.remote_path_var, self._remote_go)
+        self.local_status = tk.StringVar(value="0 items")
+        self.remote_status = tk.StringVar(value="Not connected")
+        self.local_tree = self._pane(left, "LOCAL", self.local_path_var, self._local_go, remote=False)
+        self.remote_tree = self._pane(right, "REMOTE", self.remote_path_var, self._remote_go, remote=True)
         self.local_tree.bind("<Double-1>", self._local_open)
         self.remote_tree.bind("<Double-1>", self._remote_open)
 
-        actions = ttk.Frame(self, padding=(10, 7))
-        actions.pack(fill="x")
-        ttk.Button(actions, text=_("Upload") + " →", command=self._upload).pack(side="left", padx=3)
-        ttk.Button(actions, text="← " + _("Download"), command=self._download).pack(side="left", padx=3)
-        ttk.Button(actions, text="New remote folder", command=self._remote_mkdir).pack(side="left", padx=3)
-        ttk.Button(actions, text="Rename remote", command=self._remote_rename).pack(side="left", padx=3)
-        ttk.Button(actions, text="Delete remote", command=self._remote_delete).pack(side="left", padx=3)
-        ttk.Button(actions, text="Edit remote", command=self._remote_edit).pack(side="left", padx=3)
-        ttk.Button(actions, text="Sync…", command=self._sync).pack(side="left", padx=3)
-        ttk.Button(actions, text="Close tab", command=self._close_tab).pack(side="left", padx=3)
-        ttk.Button(actions, text=_("Refresh"), command=self._refresh_all).pack(side="left", padx=3)
-
-        queue_frame = ttk.LabelFrame(self, text=_("Transfers"), padding=5)
-        queue_frame.pack(fill="x", padx=10, pady=(0, 10))
-        self.transfer_tree = ttk.Treeview(queue_frame, columns=("state", "progress"), show="headings", height=4)
+        self.queue_frame = ttk.LabelFrame(self, text=_("Transfers"), padding=4)
+        self.transfer_tree = ttk.Treeview(self.queue_frame, columns=("state", "progress"), show="headings", height=3)
         self.transfer_tree.heading("state", text="State")
         self.transfer_tree.heading("progress", text="Transfer")
         self.transfer_tree.column("state", width=100, stretch=False)
         self.transfer_tree.pack(fill="x")
+        self._queue_visible = False
         self.status = tk.StringVar(value=_("Ready"))
-        status_bar = ttk.Frame(self)
-        status_bar.pack(fill="x", padx=12, pady=(0, 8))
-        ttk.Label(status_bar, textvariable=self.status, anchor="w").pack(side="left", fill="x", expand=True)
+        self.status_bar = ttk.Frame(self, style="Status.TFrame", padding=(7, 4))
+        self.status_bar.pack(fill="x", pady=(3, 0))
+        ttk.Label(self.status_bar, textvariable=self.status, anchor="w", style="Status.TLabel").pack(
+            side="left", fill="x", expand=True
+        )
         self.update_button = ttk.Button(
-            status_bar,
+            self.status_bar,
             text="Check for updates",
             command=self._update_clicked,
         )
         self.update_button.pack(side="right")
+
+    def _configure_theme(self) -> None:
+        style = ttk.Style(self)
+        style.theme_use("clam")
+        c = self.colors
+        self.option_add("*Font", (self.ui_font, 9))
+        self.option_add("*TCombobox*Listbox.background", c["panel"])
+        self.option_add("*TCombobox*Listbox.foreground", c["text"])
+        style.configure(".", background=c["surface"], foreground=c["text"], fieldbackground=c["panel"])
+        style.configure("TFrame", background=c["surface"])
+        style.configure("Card.TFrame", background=c["panel_alt"])
+        style.configure("Toolbar.TFrame", background="#2b2d2f")
+        style.configure("Status.TFrame", background="#111315")
+        style.configure("TLabel", background=c["surface"], foreground=c["text"])
+        style.configure("Card.TLabel", background=c["panel_alt"], foreground=c["text"])
+        style.configure("Toolbar.TLabel", background="#2b2d2f", foreground=c["text"])
+        style.configure("Status.TLabel", background="#111315", foreground=c["muted"])
+        style.configure("Section.TLabel", background=c["surface"], foreground="#7fc8ff", font=(self.ui_font, 9, "bold"))
+        style.configure("Muted.TLabel", background=c["panel_alt"], foreground=c["muted"])
+        style.configure(
+            "TButton", background=c["panel_alt"], foreground=c["text"], bordercolor=c["border"], padding=(8, 5)
+        )
+        style.map("TButton", background=[("active", "#34383c"), ("pressed", "#131517")])
+        style.configure("Toolbar.TButton", background="#2b2d2f", padding=(8, 5))
+        style.map("Toolbar.TButton", background=[("active", "#3a3e42")])
+        style.configure("Accent.TButton", background=c["accent"], foreground="#ffffff", bordercolor=c["accent"])
+        style.map("Accent.TButton", background=[("active", c["accent_hover"]), ("pressed", "#0d65aa")])
+        style.configure("Update.TButton", foreground=c["warning"])
+        style.configure("TEntry", fieldbackground=c["panel"], foreground=c["text"], insertcolor=c["text"], padding=5)
+        style.configure("TCombobox", fieldbackground=c["panel"], foreground=c["text"], arrowcolor=c["text"], padding=4)
+        style.map("TCombobox", fieldbackground=[("readonly", c["panel"])], foreground=[("readonly", c["text"])])
+        style.configure(
+            "Treeview",
+            background=c["panel"],
+            fieldbackground=c["panel"],
+            foreground=c["text"],
+            rowheight=24,
+            borderwidth=0,
+        )
+        style.map("Treeview", background=[("selected", c["accent"])], foreground=[("selected", "#ffffff")])
+        style.configure("Treeview.Heading", background="#111315", foreground=c["text"], relief="flat", padding=(6, 5))
+        style.map("Treeview.Heading", background=[("active", "#303438")])
+        style.configure("TNotebook", background=c["surface"], borderwidth=0)
+        style.configure("TNotebook.Tab", background="#25282b", foreground=c["muted"], padding=(14, 6))
+        style.map("TNotebook.Tab", background=[("selected", "#303438")], foreground=[("selected", c["text"])])
+        style.configure("TLabelframe", background=c["surface"], foreground=c["muted"], bordercolor=c["border"])
+        style.configure("TLabelframe.Label", background=c["surface"], foreground=c["muted"])
+        style.configure("Dark.TPanedwindow", background=c["border"])
+
+    def _build_menu(self) -> None:
+        c = self.colors
+
+        def themed_menu(parent: tk.Misc) -> tk.Menu:
+            return tk.Menu(
+                parent,
+                tearoff=False,
+                background="#0f1113",
+                foreground=c["text"],
+                activebackground=c["accent"],
+                activeforeground="#ffffff",
+                borderwidth=0,
+            )
+
+        menu = themed_menu(self)
+        session = themed_menu(menu)
+        session.add_command(label="New session…", command=self._show_login_dialog, accelerator="Ctrl+N")
+        session.add_command(label="Save current site", command=self._save_profile, accelerator="Ctrl+S")
+        session.add_command(label="Import WinSCP INI…", command=self._import_winscp_ini)
+        session.add_separator()
+        session.add_command(label="Save workspace…", command=self._save_workspace)
+        session.add_command(label="Open workspace…", command=self._open_workspace)
+        session.add_separator()
+        session.add_command(label="Exit", command=self._close)
+        menu.add_cascade(label="Session", menu=session)
+        local = themed_menu(menu)
+        local.add_command(label="Parent directory", command=self._local_parent, accelerator="Alt+Up")
+        local.add_command(label="Home directory", command=self._local_home)
+        local.add_command(label="Refresh", command=self._refresh_local, accelerator="F5")
+        local.add_command(label="Upload selected", command=self._upload, accelerator="F6")
+        menu.add_cascade(label="Local", menu=local)
+        remote = themed_menu(menu)
+        remote.add_command(label="Parent directory", command=self._remote_parent)
+        remote.add_command(label="Refresh", command=self._refresh_remote)
+        remote.add_separator()
+        remote.add_command(label="Download selected", command=self._download)
+        remote.add_command(label="Edit selected", command=self._remote_edit)
+        remote.add_command(label="Rename selected", command=self._remote_rename)
+        remote.add_command(label="Delete selected", command=self._remote_delete)
+        remote.add_command(label="New directory…", command=self._remote_mkdir)
+        menu.add_cascade(label="Remote", menu=remote)
+        commands = themed_menu(menu)
+        commands.add_command(label="Synchronize…", command=self._sync)
+        commands.add_command(label="Show/hide transfer queue", command=self._toggle_queue)
+        commands.add_command(label="Check for updates", command=lambda: self._check_for_updates(manual=True))
+        menu.add_cascade(label="Commands", menu=commands)
+        tabs = themed_menu(menu)
+        tabs.add_command(label="New session…", command=self._show_login_dialog)
+        tabs.add_command(label="Close active tab", command=self._close_tab, accelerator="Ctrl+W")
+        menu.add_cascade(label="Tabs", menu=tabs)
+        help_menu = themed_menu(menu)
+        help_menu.add_command(label="About DebSCP", command=self._show_about)
+        menu.add_cascade(label="Help", menu=help_menu)
+        menu_bar = tk.Frame(self, background="#0f1113", height=26)
+        menu_bar.pack(fill="x")
+        for label, submenu in (
+            ("Session", session),
+            ("Local", local),
+            ("Remote", remote),
+            ("Commands", commands),
+            ("Tabs", tabs),
+            ("Help", help_menu),
+        ):
+            button = tk.Menubutton(
+                menu_bar,
+                text=label,
+                menu=submenu,
+                background="#0f1113",
+                foreground=c["text"],
+                activebackground=c["accent"],
+                activeforeground="#ffffff",
+                borderwidth=0,
+                highlightthickness=0,
+                relief="flat",
+                padx=7,
+                pady=4,
+            )
+            button.pack(side="left")
+        self.bind("<Control-n>", lambda _event: self._show_login_dialog())
+        self.bind("<Control-s>", lambda _event: self._save_profile())
+        self.bind("<Control-w>", lambda _event: self._close_tab())
+        self.bind("<F5>", lambda _event: self._refresh_all())
+        self.bind("<F6>", lambda _event: self._upload())
 
     def _pane(
         self,
@@ -179,28 +304,82 @@ class DebSCPWindow(tk.Tk):
         title: str,
         path_var: tk.StringVar,
         go: Callable[[], object],
+        *,
+        remote: bool,
     ) -> ttk.Treeview:
-        bar = ttk.Frame(parent, padding=(3, 3))
+        header = ttk.Frame(parent, style="Toolbar.TFrame", padding=(5, 4))
+        header.pack(fill="x")
+        ttk.Label(header, text=title, style="Section.TLabel").pack(side="left", padx=(2, 9))
+        if remote:
+            ttk.Button(header, text="Download", style="Toolbar.TButton", command=self._download).pack(side="left")
+            ttk.Button(header, text="Edit", style="Toolbar.TButton", command=self._remote_edit).pack(side="left")
+            ttk.Button(header, text="Delete", style="Toolbar.TButton", command=self._remote_delete).pack(side="left")
+            ttk.Button(header, text="New folder", style="Toolbar.TButton", command=self._remote_mkdir).pack(side="left")
+        else:
+            ttk.Button(header, text="Upload", style="Toolbar.TButton", command=self._upload).pack(side="left")
+            ttk.Button(header, text="Home", style="Toolbar.TButton", command=self._local_home).pack(side="left")
+        ttk.Button(
+            header,
+            text="Refresh",
+            style="Toolbar.TButton",
+            command=self._refresh_remote if remote else self._refresh_local,
+        ).pack(side="right")
+        ttk.Button(
+            header, text="Up", style="Toolbar.TButton", command=self._remote_parent if remote else self._local_parent
+        ).pack(side="right")
+        bar = ttk.Frame(parent, padding=(4, 4))
         bar.pack(fill="x")
-        ttk.Label(bar, text=f"{title}:").pack(side="left")
         entry = ttk.Entry(bar, textvariable=path_var)
-        entry.pack(side="left", fill="x", expand=True, padx=4)
+        entry.pack(side="left", fill="x", expand=True)
         entry.bind("<Return>", lambda _event: go())
-        ttk.Button(bar, text="Go", command=go).pack(side="right")
+        ttk.Button(bar, text="Go", command=go).pack(side="right", padx=(4, 0))
         frame = ttk.Frame(parent)
         frame.pack(fill="both", expand=True)
-        tree = ttk.Treeview(frame, columns=("name", "size", "modified"), show="headings", selectmode="browse")
+        tree = ttk.Treeview(frame, columns=("name", "size", "type", "modified"), show="headings", selectmode="browse")
         tree.heading("name", text="Name")
         tree.heading("size", text="Size")
+        tree.heading("type", text="Type")
         tree.heading("modified", text="Modified")
-        tree.column("name", width=260)
-        tree.column("size", width=90, anchor="e", stretch=False)
-        tree.column("modified", width=140, stretch=False)
+        tree.column("name", width=245)
+        tree.column("size", width=88, anchor="e", stretch=False)
+        tree.column("type", width=110, stretch=False)
+        tree.column("modified", width=145, stretch=False)
         scroll = ttk.Scrollbar(frame, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=scroll.set)
         tree.pack(side="left", fill="both", expand=True)
         scroll.pack(side="right", fill="y")
+        pane_status = self.remote_status if remote else self.local_status
+        ttk.Label(parent, textvariable=pane_status, style="Status.TLabel", padding=(5, 3)).pack(fill="x")
         return tree
+
+    def _toggle_queue(self) -> None:
+        if self._queue_visible:
+            self.queue_frame.pack_forget()
+        else:
+            self.queue_frame.pack(fill="x", padx=4, pady=(4, 0), before=self.status_bar)
+        self._queue_visible = not self._queue_visible
+
+    def _local_parent(self) -> None:
+        if self.local_path.parent != self.local_path:
+            self.local_path = self.local_path.parent
+            self._refresh_local()
+
+    def _local_home(self) -> None:
+        self.local_path = Path.home()
+        self._refresh_local()
+
+    def _remote_parent(self) -> None:
+        if self.backend and self.remote_path != "/":
+            self.remote_path_var.set(str(PurePosixPath(self.remote_path).parent))
+            self._remote_go()
+
+    def _show_about(self) -> None:
+        messagebox.showinfo(
+            "About DebSCP",
+            f"DebSCP {__version__}\n\nNative Linux dual-pane file transfer client.\n"
+            "SFTP • SCP • FTP/FTPS • WebDAV • S3",
+            parent=self,
+        )
 
     def _load_session_names(self) -> None:
         self.sessions = self.store.load()
@@ -330,22 +509,23 @@ class DebSCPWindow(tk.Tk):
         messagebox.showinfo("WinSCP import complete", "\n".join(details), parent=self)
         self.status.set(f"Imported {len(stored)} WinSCP site(s) and {passwords_imported} password(s)")
 
-    def _connect(self) -> None:
+    def _connect(self) -> bool:
         try:
             config = self._config()
             password = self.password.get() or self.credential_store.get(config.name)
         except (RuntimeError, ValueError) as exc:
             messagebox.showerror("Invalid connection", str(exc), parent=self)
-            return
+            return False
         if config.protocol == "ftp" and not messagebox.askyesno(
             "Unencrypted FTP",
             "FTP sends credentials and file data without encryption. Continue anyway?\n\nUse FTPS or SFTP when possible.",
             icon="warning",
             parent=self,
         ):
-            return
+            return False
         self.status.set(f"Connecting to {config.host}…")
         self._background(lambda: self._connect_worker(config, password))
+        return True
 
     def _connect_worker(self, config: SessionConfig, password: str | None) -> None:
         backend = create_backend(config, password)
@@ -398,6 +578,9 @@ class DebSCPWindow(tk.Tk):
         self.active_session = name
         self.remote_path_var.set(self.remote_path)
         self._show_remote(entries)
+        self.remote_status.set(
+            f"{len(entries)} items • {display_size(sum(item.size for item in entries if not item.is_dir))}"
+        )
         self.status.set(f"Connected to {self.host.get()} using {self.protocol_name.get().upper()}")
 
     def _background(self, operation: Callable[[], object]) -> None:
@@ -573,39 +756,44 @@ class DebSCPWindow(tk.Tk):
         self.local_path_var.set(str(self.local_path))
         self.local_tree.delete(*self.local_tree.get_children())
         if self.local_path.parent != self.local_path:
-            self.local_tree.insert("", "end", iid="..", values=("📁 ..", "—", ""))
+            self.local_tree.insert("", "end", iid="..", values=("..", "", "Parent directory", ""))
         try:
             entries = sorted(self.local_path.iterdir(), key=lambda item: (not item.is_dir(), item.name.casefold()))
         except OSError as exc:
             messagebox.showerror("Local folder", str(exc), parent=self)
             return
+        total_size = 0
         for item in entries:
             try:
                 details = item.stat()
-                size = "—" if item.is_dir() else str(details.st_size)
-                modified = __import__("datetime").datetime.fromtimestamp(details.st_mtime).strftime("%Y-%m-%d %H:%M")
+                size = "" if item.is_dir() else display_size(details.st_size)
+                if not item.is_dir():
+                    total_size += details.st_size
+                modified = datetime.fromtimestamp(details.st_mtime, UTC).astimezone().strftime("%d/%m/%Y %H:%M")
             except OSError:
                 size, modified = "?", "?"
-            self.local_tree.insert(
-                "", "end", iid=item.name, values=(("📁 " if item.is_dir() else "") + item.name, size, modified)
-            )
+            self.local_tree.insert("", "end", iid=item.name, values=(item.name, size, local_type(item), modified))
+        self.local_status.set(f"{len(entries)} items • {display_size(total_size)}")
 
     def _show_remote(self, entries: list[RemoteEntry]) -> None:
         self.remote_tree.delete(*self.remote_tree.get_children())
         self.remote_entries = {entry.name: entry for entry in entries}
         if self.remote_path != "/":
-            self.remote_tree.insert("", "end", iid="..", values=("📁 ..", "—", ""))
+            self.remote_tree.insert("", "end", iid="..", values=("..", "", "Parent directory", ""))
         for entry in entries:
             self.remote_tree.insert(
                 "",
                 "end",
                 iid=entry.name,
                 values=(
-                    ("📁 " if entry.is_dir else "") + entry.name,
-                    entry.display_size,
-                    entry.modified.strftime("%Y-%m-%d %H:%M"),
+                    entry.name,
+                    "" if entry.is_dir else entry.display_size,
+                    "File folder" if entry.is_dir else "File",
+                    entry.modified.strftime("%d/%m/%Y %H:%M"),
                 ),
             )
+        total_size = sum(entry.size for entry in entries if not entry.is_dir)
+        self.remote_status.set(f"{len(entries)} items • {display_size(total_size)}")
 
     def _local_open(self, _event: object) -> None:
         selected = self.local_tree.selection()
@@ -745,6 +933,7 @@ class DebSCPWindow(tk.Tk):
         self.active_session = None
         self.backend = None
         self.remote_tree.delete(*self.remote_tree.get_children())
+        self.remote_status.set("Not connected")
         if self.tabs.tabs():
             self.tabs.select(self.tabs.tabs()[0])
             self._tab_changed()
@@ -861,6 +1050,8 @@ class DebSCPWindow(tk.Tk):
             self._background(apply_sync)
 
     def _transfer_update(self, job: TransferJob) -> None:
+        if not self._queue_visible:
+            self._toggle_queue()
         progress = f"{job.transferred}/{job.total} bytes" if job.total else job.label
         if job.error:
             progress = job.error

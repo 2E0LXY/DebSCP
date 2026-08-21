@@ -1,10 +1,11 @@
 [Desktop Entry]
-Type=Application
+Type=Service
+MimeType=application/octet-stream;inode/directory;text/plain;image/jpeg;image/png;application/pdf;
+Actions=sendWithDebSCP;
+X-KDE-ServiceTypes=KonqPopupMenu/Plugin
+
+[Desktop Action sendWithDebSCP]
 Name=Send with DebSCP
-Comment=Upload selected files using a saved DebSCP session
+Comment=Upload selected files using a saved DebSCP account
 Exec=debscp-send %F
 Icon=debscp
-Terminal=false
-NoDisplay=true
-MimeType=application/octet-stream;inode/directory;text/plain;image/jpeg;image/png;application/pdf;
-Categories=Network;FileTransfer;

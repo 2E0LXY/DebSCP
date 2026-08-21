@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "debscp"
-version = "0.6.0"
+version = "0.6.1"
 description = "Native Linux multi-protocol file transfer client inspired by WinSCP"
 readme = "README.md"
 requires-python = ">=3.11"

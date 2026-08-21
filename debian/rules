@@ -14,7 +14,9 @@ override_dh_auto_install:
 		rm -rf "$$directory"; \
 	done
 	install -Dm644 packaging/debscp.desktop debian/debscp/usr/share/applications/debscp.desktop
-	install -Dm644 packaging/debscp-send.desktop debian/debscp/usr/share/applications/debscp-send.desktop
+	# Keep the file-manager helper out of /usr/share/applications. Discover picks
+	# an arbitrary Application desktop file as its post-install Launch target.
+	install -Dm644 packaging/debscp-send.desktop debian/debscp/usr/share/kio/servicemenus/debscp-send.desktop
 	install -Dm644 assets/debscp.svg debian/debscp/usr/share/icons/hicolor/scalable/apps/debscp.svg
 
 override_dh_auto_test:

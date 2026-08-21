@@ -1,3 +1,10 @@
+debscp (0.6.1) unstable; urgency=high
+
+  * Ensure Discover launches DebSCP rather than the file-selection helper.
+  * Install Send with DebSCP as a KDE file-manager service menu.
+
+ -- Daren Loxley <2e0lxy@users.noreply.github.com>  Fri, 21 Aug 2026 10:25:00 +0100
+
 debscp (0.6.0) unstable; urgency=medium
 
   * Add a WinSCP-style startup login and saved-account manager.

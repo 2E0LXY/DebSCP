@@ -135,9 +135,18 @@ def test_installer_uses_fixed_absolute_commands(monkeypatch, tmp_path: Path) -> 
 
 def test_verify_debian_package_rejects_mismatched_metadata(monkeypatch, tmp_path: Path) -> None:
     class Result:
-        stdout = "other\n0.5.0\nall\n"
+        stdout = "Package: other\nVersion: 0.5.0\nArchitecture: all\n"
 
     monkeypatch.setattr(Path, "is_file", lambda self: True)
     monkeypatch.setattr("debscp.updater.subprocess.run", lambda *_args, **_kwargs: Result())
     with pytest.raises(ValueError, match="metadata"):
         verify_debian_package(tmp_path / "update.deb", info_for(b"package"))
+
+
+def test_verify_debian_package_accepts_dpkg_field_output(monkeypatch, tmp_path: Path) -> None:
+    class Result:
+        stdout = "Package: debscp\nVersion: 0.5.0\nArchitecture: all\n"
+
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr("debscp.updater.subprocess.run", lambda *_args, **_kwargs: Result())
+    verify_debian_package(tmp_path / "update.deb", info_for(b"package"))

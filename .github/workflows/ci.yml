@@ -29,6 +29,14 @@ jobs:
       - run: sudo apt-get install -y build-essential debhelper dh-python devscripts pybuild-plugin-pyproject python3-all python3-setuptools
       - run: python3 tools/compile_translations.py
       - run: dpkg-buildpackage --no-sign
+      - name: Verify version-independent Python install path
+        run: |
+          package=$(find .. -maxdepth 1 -name 'debscp_*_all.deb' -print -quit)
+          dpkg-deb --contents "$package" | grep -q './usr/lib/python3/dist-packages/debscp/__init__.py'
+          if dpkg-deb --contents "$package" | grep -Eq './usr/lib/python3\.[0-9]+/dist-packages/debscp/'; then
+            echo 'Package incorrectly uses a build-runner-specific Python path' >&2
+            exit 1
+          fi
       - run: mkdir -p artifacts && cp ../debscp_*.deb artifacts/
       - uses: actions/upload-artifact@v4
         with:

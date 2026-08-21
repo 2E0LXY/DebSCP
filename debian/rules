@@ -5,6 +5,14 @@
 
 override_dh_auto_install:
 	dh_auto_install
+	# This is an Architecture: all package. Move any build-runner-specific
+	# python3.X output into Debian's version-independent dist-packages path.
+	set -e; for directory in debian/debscp/usr/lib/python3.*; do \
+		[ -d "$$directory/dist-packages" ] || continue; \
+		mkdir -p debian/debscp/usr/lib/python3/dist-packages; \
+		cp -a "$$directory/dist-packages/." debian/debscp/usr/lib/python3/dist-packages/; \
+		rm -rf "$$directory"; \
+	done
 	install -Dm644 packaging/debscp.desktop debian/debscp/usr/share/applications/debscp.desktop
 	install -Dm644 packaging/debscp-send.desktop debian/debscp/usr/share/applications/debscp-send.desktop
 	install -Dm644 assets/debscp.svg debian/debscp/usr/share/icons/hicolor/scalable/apps/debscp.svg

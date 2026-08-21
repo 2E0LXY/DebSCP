@@ -1,3 +1,13 @@
+debscp (0.5.1) unstable; urgency=high
+
+  * Install Python modules into Debian's version-independent dist-packages path.
+  * Fix immediate desktop-launch failure on systems whose Python minor version
+    differs from the Ubuntu release builder.
+  * Block CI and releases containing python3.X-specific module directories.
+  * Parse labelled dpkg-deb metadata correctly during automatic updates.
+
+ -- DebSCP contributors <noreply@github.com>  Fri, 21 Aug 2026 10:30:00 +0100
+
 debscp (0.5.0) unstable; urgency=medium
 
   * Add background and manual checks for stable GitHub releases.

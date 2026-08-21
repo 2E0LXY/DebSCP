@@ -5,7 +5,7 @@ workflow of WinSCP. It provides a dual-pane file manager, SFTP, SCP, FTP/FTPS,
 WebDAV and S3 backends, synchronization, remote editing, saved workspaces,
 automation, and Debian packaging without Wine or Windows libraries.
 
-> **Project status:** v0.5.0 implements every capability category in the port
+> **Project status:** v0.5.1 implements every capability category in the port
 > matrix. It is still an independent implementation, so protocol edge cases
 > and UI details can differ from WinSCP. See the [compatibility matrix](docs/PORT_STATUS.md).
 > DebSCP is an independent project and is not affiliated with or endorsed by
@@ -37,7 +37,7 @@ automation, and Debian packaging without Wine or Windows libraries.
 Download the `.deb` from [GitHub Releases](https://github.com/2E0LXY/DebSCP/releases) and run:
 
 ```sh
-sudo apt install ./debscp_0.5.0_all.deb
+sudo apt install ./debscp_0.5.1_all.deb
 ```
 
 Launch **DebSCP** from the application menu, run `debscp-gui`, or use the CLI:

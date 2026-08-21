@@ -5,7 +5,7 @@ workflow of WinSCP. It provides a dual-pane file manager, SFTP, SCP, FTP/FTPS,
 WebDAV and S3 backends, synchronization, remote editing, saved workspaces,
 automation, and Debian packaging without Wine or Windows libraries.
 
-> **Project status:** v0.5.1 implements every capability category in the port
+> **Project status:** v0.6.0 implements every capability category in the port
 > matrix. It is still an independent implementation, so protocol edge cases
 > and UI details can differ from WinSCP. See the [compatibility matrix](docs/PORT_STATUS.md).
 > DebSCP is an independent project and is not affiliated with or endorsed by
@@ -14,6 +14,8 @@ automation, and Debian packaging without Wine or Windows libraries.
 ## Features
 
 - Native Linux GUI with local and remote file panes
+- WinSCP-style startup login manager with searchable saved accounts, folders,
+  workspaces, duplicate/rename/delete actions, and a separate Quick Connect path
 - SFTP and SCP over SSH with password, SSH agent, or private-key authentication
 - FTP, certificate-validated FTPS, WebDAV/HTTPS, Amazon S3 and S3-compatible storage
 - Strict host-key checking with an explicit first-connection fingerprint prompt
@@ -37,7 +39,7 @@ automation, and Debian packaging without Wine or Windows libraries.
 Download the `.deb` from [GitHub Releases](https://github.com/2E0LXY/DebSCP/releases) and run:
 
 ```sh
-sudo apt install ./debscp_0.5.1_all.deb
+sudo apt install ./debscp_0.6.0_all.deb
 ```
 
 Launch **DebSCP** from the application menu, run `debscp-gui`, or use the CLI:
@@ -84,7 +86,14 @@ after v0.5.0 can then be installed from the flashing in-app button.
 
 ## Import sites from a WinSCP backup
 
-In the GUI, select **Import WinSCP INI**, choose the `.ini` created by WinSCP's
+On startup, DebSCP opens the **Login** account manager. Choose a saved account
+and press **Login**, double-click it, or create and save a new site. Accounts can
+be organised into folders, found with the search field, duplicated, renamed,
+moved, and deleted. Passwords remain in the system credential store. Select
+**Quick Connect** to open the transfer window without connecting; its compact
+connection strip remains available for one-off tests.
+
+Select **Import WinSCP…**, choose the `.ini` created by WinSCP's
 **Tools → Export/Backup configuration** command, and review the import report.
 From the command line:
 

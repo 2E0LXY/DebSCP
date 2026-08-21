@@ -13,6 +13,7 @@ from .backends import RemoteBackend, SFTPBackend, UnknownHostKey, create_backend
 from .credentials import CredentialStore
 from .editor import RemoteEditConflict, RemoteEditor
 from .i18n import _
+from .login_dialog import LoginDialog
 from .models import DEFAULT_PORTS, RemoteEntry, SessionConfig, normalize_remote_path
 from .session_store import SessionStore
 from .sync import SyncDirection, SyncEngine
@@ -59,6 +60,8 @@ class DebSCPWindow(tk.Tk):
         self._load_session_names()
         self._refresh_local()
         self._next_update_check = self.after(1500, self._check_for_updates)
+        self.withdraw()
+        self.after_idle(self._show_login_dialog)
 
     def _build(self) -> None:
         style = ttk.Style(self)
@@ -93,6 +96,7 @@ class DebSCPWindow(tk.Tk):
                 widget.grid(row=0, column=index * 2 + 1, padx=(0, 7), sticky="ew")
         ttk.Button(connection, text=_("Connect"), command=self._connect).grid(row=0, column=10, padx=3)
         ttk.Button(connection, text=_("Save"), command=self._save_profile).grid(row=0, column=11, padx=3)
+        ttk.Button(connection, text="Accounts…", command=self._show_login_dialog).grid(row=0, column=12, padx=3)
         ttk.Label(connection, text="Protocol").grid(row=1, column=0, padx=(3, 2), pady=(6, 0), sticky="w")
         protocol_box = ttk.Combobox(
             connection,
@@ -201,6 +205,38 @@ class DebSCPWindow(tk.Tk):
     def _load_session_names(self) -> None:
         self.sessions = self.store.load()
         self.profile_box["values"] = [item.name for item in self.sessions]
+
+    def _show_login_dialog(self) -> None:
+        for child in self.winfo_children():
+            if isinstance(child, LoginDialog):
+                child.lift()
+                return
+        LoginDialog(
+            self,
+            self.store,
+            self.credential_store,
+            self._login_from_dialog,
+            self._show_quick_connect,
+            self._open_workspace_named,
+            self._import_winscp_ini,
+        )
+
+    def _show_quick_connect(self) -> None:
+        self.deiconify()
+        self.lift()
+
+    def _login_from_dialog(self, config: SessionConfig, password: str | None) -> None:
+        self.deiconify()
+        self.session_name.set(config.name)
+        self.host.set(config.host)
+        self.port.set(str(config.port))
+        self.username.set(config.username)
+        self.password.set(password or "")
+        self.protocol_name.set(config.protocol)
+        self.key_file.set(config.key_file or "")
+        self.remote_path_var.set(config.remote_path)
+        self.status.set(f"Connecting to {config.host}…")
+        self._background(lambda: self._connect_worker(config, password))
 
     def _profile_selected(self, _event: object = None) -> None:
         selected = next((item for item in self.sessions if item.name == self.session_name.get()), None)
@@ -730,6 +766,14 @@ class DebSCPWindow(tk.Tk):
         listing = "\n".join(f"• {name}: {', '.join(sessions)}" for name, sessions in workspaces.items())
         name = simpledialog.askstring("Open workspace", f"{listing}\n\nWorkspace name:", parent=self)
         if not name or name not in workspaces:
+            return
+        self._open_workspace_named(name)
+
+    def _open_workspace_named(self, name: str) -> None:
+        self.deiconify()
+        workspaces = WorkspaceStore().load()
+        if name not in workspaces:
+            messagebox.showerror("Workspace", f"Workspace {name!r} no longer exists.", parent=self)
             return
         saved = {item.name: item for item in self.sessions}
         for session_name in workspaces[name]:

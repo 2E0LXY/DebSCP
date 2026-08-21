@@ -37,6 +37,7 @@ class SessionConfig:
     region: str | None = None
     proxy_command: str | None = None
     jump_host: str | None = None
+    folder: str = "Sites"
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -57,6 +58,7 @@ class SessionConfig:
             region=str(value["region"]) if value.get("region") else None,
             proxy_command=str(value["proxy_command"]) if value.get("proxy_command") else None,
             jump_host=str(value["jump_host"]) if value.get("jump_host") else None,
+            folder=str(value.get("folder", "Sites")).strip() or "Sites",
         )
 
 

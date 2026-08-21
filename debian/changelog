@@ -1,3 +1,12 @@
+debscp (0.6.0) unstable; urgency=medium
+
+  * Add a WinSCP-style startup login and saved-account manager.
+  * Add searchable account folders, profile duplication, rename/move and deletion.
+  * Expose saved workspaces and WinSCP import from the login screen.
+  * Keep the in-window connection strip as Quick Connect.
+
+ -- Daren Loxley <2e0lxy@users.noreply.github.com>  Fri, 21 Aug 2026 12:00:00 +0100
+
 debscp (0.5.1) unstable; urgency=high
 
   * Install Python modules into Debian's version-independent dist-packages path.

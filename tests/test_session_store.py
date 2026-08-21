@@ -23,6 +23,17 @@ def test_upsert_replaces_by_name(tmp_path) -> None:
     assert [item.host for item in store.load()] == ["new"]
 
 
+def test_folder_round_trip_and_profile_rename(tmp_path) -> None:
+    store = SessionStore(tmp_path / "sessions.json")
+    original = SessionConfig("Primary", "old.example", "alex", folder="Work")
+    store.upsert(original)
+
+    renamed = SessionConfig("Production", "new.example", "alex", folder="Servers")
+    store.replace("Primary", renamed)
+
+    assert store.load() == [renamed]
+
+
 def test_merge_renames_collisions_or_overwrites(tmp_path) -> None:
     store = SessionStore(tmp_path / "sessions.json")
     store.upsert(SessionConfig("lab", "old", "alex"))

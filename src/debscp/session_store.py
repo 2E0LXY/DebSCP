@@ -63,3 +63,9 @@ class SessionStore:
 
     def delete(self, name: str) -> None:
         self.save([item for item in self.load() if item.name != name])
+
+    def replace(self, old_name: str, session: SessionConfig) -> None:
+        """Replace a profile, including a rename, without leaving the old entry."""
+        sessions = [item for item in self.load() if item.name != old_name and item.name != session.name]
+        sessions.append(session)
+        self.save(sorted(sessions, key=lambda item: (item.folder.casefold(), item.name.casefold())))

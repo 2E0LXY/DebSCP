@@ -166,9 +166,11 @@ def verify_debian_package(package: Path, info: UpdateInfo) -> None:
         timeout=30,
     )
     fields = dict(line.split(":", 1) for line in result.stdout.splitlines() if ":" in line)
-    if (fields.get("Package", "").strip() != "debscp" or
-            fields.get("Version", "").strip() != info.version or
-            fields.get("Architecture", "").strip() != "all"):
+    if (
+        fields.get("Package", "").strip() != "debscp"
+        or fields.get("Version", "").strip() != info.version
+        or fields.get("Architecture", "").strip() != "all"
+    ):
         raise ValueError("The downloaded Debian package metadata does not match this DebSCP release")
 
 

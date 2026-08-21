@@ -3,7 +3,6 @@ debscp (0.7.0) unstable; urgency=medium
   * Add a dark WinSCP-style dual-pane transfer workspace.
   * Restyle the saved-account manager while preserving folders and import tools.
   * Add compact menus, transfer controls, pane metadata and activity-aware queue.
-  * Modernize Python packaging licence metadata.
 
  -- Daren Loxley <2e0lxy@users.noreply.github.com>  Fri, 21 Aug 2026 15:40:07 +0100
 
